@@ -1,0 +1,6 @@
+<!doctype html><html lang="zh-CN"><meta charset="UTF-8"><title>Ayase 气泡与通道回归</title>
+<style>body{padding:22px;min-width:1020px!important}main{display:flex;gap:24px;align-items:start}.test-stage{background:linear-gradient(135deg,#eee4f0,#fff5f9);border:1px solid #d8c8d8;position:relative;flex:none}.test-controls{width:340px}#result{white-space:pre-wrap}h1{margin-bottom:8px!important}.toolbar{margin:15px 0;display:flex;gap:8px;flex-wrap:wrap}</style>
+<h1>实际前端组件 · 本地回归</h1><p>使用本机 Ema 图集；模拟宿主任务与回执，不作为原生全屏/媒体证明。</p>
+<div class="toolbar"><button id="short">短回复</button><button id="long">长回复</button><button id="combined">动作提前完成</button><button id="stop">停止</button><button id="suite">运行布局回归</button></div>
+<main><div class="test-stage pet" id="stage"></div><aside class="test-controls"><label>模型比例<select id="zoom"><option>0.6</option><option selected>1</option><option>1.6</option></select></label><label>字号<select id="font"><option selected>15</option><option>24</option></select></label><label>动效<select id="animation"><option value="typewriter">打字机</option><option value="none">立即显示</option></select></label><p id="status">加载中</p><pre id="result"></pre><pre id="receipts"></pre></aside></main>
+<script type="module" src="./preview.ts"></script></html>

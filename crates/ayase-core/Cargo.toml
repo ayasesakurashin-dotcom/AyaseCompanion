@@ -1,0 +1,18 @@
+[package]
+name = "ayase-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.149"
+zip = { version = "=2.4.2", default-features = false, features = ["deflate"] }
+image = { version = "=0.25.9", default-features = false, features = ["png", "webp"] }
+sha2 = "=0.10.9"
+uuid = { version = "=1.19.0", features = ["v4", "serde"] }
+chrono = { version = "=0.4.43", features = ["serde"] }
+chrono-tz = "=0.10.4"
+regex = "1"
+
+[dev-dependencies]
+tempfile = "=3.24.0"

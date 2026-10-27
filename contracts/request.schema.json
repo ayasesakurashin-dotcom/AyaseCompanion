@@ -1,0 +1,6 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","required":["mode","variants"],"additionalProperties":false,
+  "properties":{"mode":{"const":"fixed"},"variants":{"type":"array","minItems":1,"maxItems":64,"items":{"type":"object","required":["id"],"properties":{
+    "id":{"type":"string","minLength":1,"maxLength":128},"weight":{"type":"number","minimum":0.001,"maximum":10000},"text":{"anyOf":[{"type":"null"},{"type":"string","maxLength":12000}]},"textAsset":{"anyOf":[{"type":"null"},{"type":"string"}]},"audioAsset":{"anyOf":[{"type":"null"},{"type":"string"}]},"cue":{"anyOf":[{"type":"null"},{"type":"string"}]},"readMs":{"type":"integer","minimum":1000,"maximum":30000}
+  }}}}
+}

@@ -1,0 +1,14 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "type":"object","required":["schemaVersion","subscriptions","rules"],"additionalProperties":false,
+  "properties":{
+    "schemaVersion":{"const":"1.0"},
+    "subscriptions":{"type":"array","maxItems":32,"items":{"type":"object","required":["id","type"],"additionalProperties":false,"properties":{"id":{"type":"string","minLength":1},"type":{"enum":["app.ready","environment.fullscreen","environment.media","schedule.daily"]},"timeFromConfig":{"type":"string"},"timeZoneFromConfig":{"type":"string"},"missedPolicyFromConfig":{"type":"string"}}}},
+    "rules":{"type":"array","maxItems":64,"items":{"type":"object","required":["id","on","actions"],"additionalProperties":false,"properties":{
+      "id":{"type":"string","minLength":1},"on":{"type":"string"},"when":{"enum":["active","inactive","always"]},"dedupe":{"type":"object"},
+      "actions":{"type":"array","minItems":1,"maxItems":8,"items":{"type":"object","required":["type"],"additionalProperties":false,"properties":{
+        "type":{"enum":["presentation.request","base.claim","base.release","state.set"]},"responseFromConfig":{"type":"string"},"ttlSecondsFromConfig":{"type":"string"},"modeFromConfig":{"type":"string"},"suppressFromConfig":{"type":"string"},"key":{"type":"string","maxLength":64},"value":{"anyOf":[{"type":"boolean"},{"type":"number"},{"type":"string","maxLength":256}]}
+      }}}
+    }}}
+  }
+}

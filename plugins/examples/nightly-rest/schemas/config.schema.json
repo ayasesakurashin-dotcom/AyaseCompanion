@@ -1,0 +1,118 @@
+{
+  "type": "object",
+  "required": [
+    "time",
+    "timeZone",
+    "missedPolicy",
+    "ttlSeconds",
+    "response"
+  ],
+  "properties": {
+    "time": {
+      "type": "string",
+      "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+      "title": "每天提醒时间"
+    },
+    "timeZone": {
+      "type": "string",
+      "title": "IANA 时区或 system"
+    },
+    "missedPolicy": {
+      "enum": [
+        "skip",
+        "within-ttl"
+      ],
+      "title": "错过提醒时"
+    },
+    "ttlSeconds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3600,
+      "default": 300,
+      "title": "排队有效期（秒）"
+    },
+    "response": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "required": [
+        "mode",
+        "variants"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "const": "fixed"
+        },
+        "variants": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "required": [
+              "id"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "weight": {
+                "type": "number",
+                "minimum": 0.001,
+                "maximum": 10000
+              },
+              "text": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "string",
+                    "maxLength": 12000
+                  }
+                ]
+              },
+              "textAsset": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ]
+              },
+              "audioAsset": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ]
+              },
+              "cue": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ]
+              },
+              "readMs": {
+                "type": "integer",
+                "minimum": 1000,
+                "maximum": 30000
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "1.0",
+  "subscriptions": [
+    {
+      "id": "daily-rest",
+      "type": "schedule.daily",
+      "timeFromConfig": "/time",
+      "timeZoneFromConfig": "/timeZone",
+      "missedPolicyFromConfig": "/missedPolicy"
+    }
+  ],
+  "rules": [
+    {
+      "id": "rest",
+      "on": "daily-rest",
+      "actions": [
+        {
+          "type": "presentation.request",
+          "responseFromConfig": "/response",
+          "ttlSecondsFromConfig": "/ttlSeconds"
+        }
+      ]
+    }
+  ]
+}

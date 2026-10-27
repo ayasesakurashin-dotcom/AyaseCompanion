@@ -1,0 +1,1 @@
+{"identifier":"desktop","description":"Local companion windows","windows":["pet","control","input"],"permissions":["core:default","core:window:allow-start-dragging","core:window:allow-show","core:window:allow-hide","core:window:allow-set-focus","dialog:allow-open","dialog:allow-save"]}

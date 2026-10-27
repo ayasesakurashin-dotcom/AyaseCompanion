@@ -1,0 +1,78 @@
+{
+  "manifest": {
+    "format": "ayase.plugin",
+    "formatVersion": "1.0",
+    "pluginId": "ayase.fullscreen-quiet",
+    "version": "0.1.0",
+    "displayName": "全屏安静",
+    "apiVersion": "1.0",
+    "configVersion": "1.0",
+    "runtime": {
+      "type": "declarative.v1",
+      "entry": "rules/main.json"
+    },
+    "configSchema": "schemas/config.schema.json",
+    "defaultPriority": "important",
+    "capabilities": [
+      "environment.read",
+      "base.claim",
+      "base.release"
+    ],
+    "defaults": {
+      "mode": "quiet",
+      "suppress": true
+    }
+  },
+  "schema": {
+    "type": "object",
+    "required": [
+      "mode",
+      "suppress"
+    ],
+    "properties": {
+      "mode": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 63,
+        "title": "基础姿态"
+      },
+      "suppress": {
+        "type": "boolean",
+        "title": "抑制新主动互动"
+      }
+    }
+  },
+  "rules": {
+    "schemaVersion": "1.0",
+    "subscriptions": [
+      {
+        "id": "environment",
+        "type": "environment.fullscreen"
+      }
+    ],
+    "rules": [
+      {
+        "id": "on",
+        "on": "environment",
+        "when": "active",
+        "actions": [
+          {
+            "type": "base.claim",
+            "modeFromConfig": "/mode",
+            "suppressFromConfig": "/suppress"
+          }
+        ]
+      },
+      {
+        "id": "off",
+        "on": "environment",
+        "when": "inactive",
+        "actions": [
+          {
+            "type": "base.release"
+          }
+        ]
+      }
+    ]
+  }
+}

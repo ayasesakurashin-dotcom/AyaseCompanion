@@ -1,0 +1,23 @@
+{
+  "name": "ayase-companion",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "check": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "tauri": "tauri",
+    "fixtures": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/create-fixtures.ps1"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.9.1",
+    "@tauri-apps/plugin-dialog": "2.6.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.9.6",
+    "typescript": "5.6.3",
+    "vite": "6.4.1"
+  }
+}
