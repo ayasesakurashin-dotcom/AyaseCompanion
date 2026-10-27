@@ -51,7 +51,7 @@ article p{margin-bottom:8px}
 .list-row{display:flex;justify-content:space-between;align-items:center;gap:15px;padding:17px 0;border-bottom:1px solid var(--line)}
 .list-row small{display:block;margin-top:5px}
 .empty{padding:25px;color:var(--muted);text-align:center}
-.grid-two{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin:16px 0}
+.grid-two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;margin:16px 0}
 .play-form{background:#fff;border:1px solid var(--line);border-radius:12px;padding:22px}
 .play-form>.actions{margin-top:14px}
 .inline-state{padding:14px 16px;background:#f2e8f2;border-radius:8px;margin:20px 0;line-height:1.7}
@@ -76,6 +76,66 @@ dialog .section-title button{font-size:20px;border:0;background:none}
 .field>label{font-size:12px;margin-bottom:7px}
 .field>input:not([type=checkbox]),.field>select{width:100%}
 fieldset{border:1px solid var(--line);border-radius:8px;margin:0;padding:10px 14px}
+
+/* Settings controls have explicit horizontal check rows and separate action areas. */
+.control-shell nav{flex-wrap:wrap;column-gap:24px;row-gap:0}
+.control-shell label{min-width:0}
+.control-shell input:not([type=checkbox]):not([type=range]),.control-shell select{min-height:40px;line-height:1.4;min-width:0}
+.control-shell input[type=checkbox]{width:18px;height:18px;margin:0;flex:none}
+.control-shell label:has(>input[type=checkbox]){flex-direction:row;align-items:center;gap:10px}
+.control-shell button{min-height:38px}
+.ai-settings{display:grid;gap:24px}
+.ai-settings[hidden]{display:none}
+.panel-intro{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}
+.panel-intro p,.card-heading p{color:var(--muted);font-size:13px;margin-top:7px}
+.owner-badge{flex:none;border:1px solid var(--line);border-radius:20px;padding:7px 12px;color:var(--accent);font-size:12px;max-width:45%;overflow-wrap:anywhere}
+.ai-settings .settings-card{margin:0;padding:24px;border-radius:14px;background:#fff}
+.card-heading{margin-bottom:22px}
+.card-heading h3{margin:0;font-size:18px}
+.settings-form{display:grid;gap:20px}
+.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px 22px;align-items:start}
+.form-grid .span-all{grid-column:1/-1}
+.ai-settings input:not([type=checkbox]),.ai-settings select,.ai-settings textarea{width:100%;min-width:0}
+.ai-settings label{font-size:13px;line-height:1.5;gap:8px}
+.ai-settings label small{font-size:12px;color:var(--muted)}
+.ai-settings .check-row{display:grid;grid-template-columns:18px minmax(0,1fr);align-items:start;gap:10px;line-height:1.6;cursor:pointer}
+.ai-settings .check-row>input[type=checkbox]{margin-top:2px;width:18px;height:18px}
+.check-row span{min-width:0;overflow-wrap:anywhere}
+.check-row small{display:block;margin-top:3px;line-height:1.6}
+.check-stack{display:grid;gap:16px;padding:4px 0}
+.form-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding-top:16px;border-top:1px solid var(--line)}
+.ai-settings .form-actions button{min-height:40px}
+.result-message{font-size:12px;line-height:1.7;color:#526955;overflow-wrap:anywhere}
+.result-message:empty{display:none}
+.result-message.is-error{color:#a44343;background:#fff3f0;border-radius:7px;padding:9px 12px}
+.service-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:18px;align-items:start}
+.provider-panel{display:grid;gap:16px;min-width:0;background:#fdfafd;padding:18px;border-radius:10px}
+.provider-panel legend{padding:0 6px;color:#65516b;font-weight:600}
+.provider-panel .provider-hint{font-size:11px;line-height:1.6;margin-top:-9px;overflow-wrap:anywhere;min-height:34px}
+.provider-panel .compact{font-size:12px}
+.provider-actions{padding-top:2px}
+.provider-actions button{width:100%}
+.service-limits{padding-top:3px}
+.voice-preview{display:grid;gap:16px}
+.ai-settings details{margin:22px 0 0;padding-top:18px;border-top:1px solid var(--line)}
+.ai-settings summary{font-size:14px;line-height:1.6;font-weight:500}
+.details-content{display:grid;gap:16px;padding-top:18px}
+.ai-settings .details-content p{margin:0}
+.ai-settings .hint{margin:0;font-size:12px}
+.voice-samples,.asset-check-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.sample-item{display:grid;gap:10px;border:1px solid var(--line);border-radius:9px;padding:12px;align-content:start}
+.sample-item textarea[hidden]{display:none}
+.sample-item textarea{font-size:12px}
+.muted-text,.empty-compact{font-size:12px;color:var(--muted);line-height:1.7}
+.voice-library{margin-top:24px;padding-top:20px;border-top:1px solid var(--line)}
+.voice-library h4{font-size:14px;margin:0 0 7px}
+.voice-library .muted-text{margin-bottom:14px}
+.voice-record{padding:16px;background:#f9f4f9;border:1px solid var(--line);border-radius:10px;margin-top:12px;display:grid;gap:14px}
+.voice-record-heading{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.voice-record input{font-family:Consolas,monospace;font-size:12px}
+.voice-record .form-actions{padding-top:0;border:0}
+.ai-settings [data-history] article{margin:16px 0 0;padding:16px}
+@media(max-width:760px){.control-shell{padding:22px 20px}.ai-settings .settings-card{padding:18px}.form-grid,.voice-samples,.asset-check-list{grid-template-columns:minmax(0,1fr)}.panel-intro{flex-wrap:wrap}.owner-badge{max-width:100%}.control-shell header{flex-wrap:wrap}.version{margin-left:0}}
 .array-item{border-left:3px solid #dcbcd5;padding:0 0 12px 12px;margin-bottom:14px}
 .array-item>.field{margin-top:0}
 .array-item>button{font-size:12px;color:#9b6259}

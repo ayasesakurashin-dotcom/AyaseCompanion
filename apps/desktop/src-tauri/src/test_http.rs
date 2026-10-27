@@ -88,8 +88,57 @@ fn respond(mut stream: TcpStream, requests: Arc<Mutex<Vec<Value>>>) -> std::io::
         }
         bytes.extend_from_slice(&b[..n]);
     }
-    let body: Value = serde_json::from_slice(&bytes[header_end..]).unwrap_or(Value::Null);
-    requests.lock().unwrap().push(json!({"body":body,"path":header.lines().next().unwrap_or(""),"authorization":header.lines().find(|l|l.to_lowercase().starts_with("authorization:")).unwrap_or("")}));
+    let raw = String::from_utf8_lossy(&bytes[header_end..]).to_string();
+    let body: Value = serde_json::from_str(&raw).unwrap_or(Value::Null);
+    let route = header.lines().next().unwrap_or("");
+    let auth = header
+        .lines()
+        .find(|l| l.to_lowercase().starts_with("authorization:"))
+        .unwrap_or("");
+    requests
+        .lock()
+        .unwrap()
+        .push(json!({"body":body,"raw":raw,"path":route,"authorization":auth}));
+    if auth.contains("synthetic-invalid-key") {
+        return response(
+            &mut stream,
+            "401 Unauthorized",
+            "application/json",
+            b"{\"error\":\"do-not-display-server-body\"}",
+        );
+    }
+    if route.starts_with("POST /model ") || route.starts_with("POST /proxy/model ") {
+        return response(
+            &mut stream,
+            "200 OK",
+            "application/json",
+            br#"{"_id":"fixture_voice_1","state":"created","visibility":"private"}"#,
+        );
+    }
+    if route.starts_with("GET /model/fixture_voice_1 ") {
+        return response(
+            &mut stream,
+            "200 OK",
+            "application/json",
+            br#"{"_id":"fixture_voice_1","state":"trained","visibility":"private"}"#,
+        );
+    }
+    if route.starts_with("GET /model?") || route.starts_with("GET /v1/models ") {
+        return response(
+            &mut stream,
+            "200 OK",
+            "application/json",
+            br#"{"items":[],"data":[]}"#,
+        );
+    }
+    if route.starts_with("GET /v1/default/banks?limit=1 ") {
+        return response(
+            &mut stream,
+            "200 OK",
+            "application/json",
+            br#"{"banks":[]}"#,
+        );
+    }
     if header
         .lines()
         .next()

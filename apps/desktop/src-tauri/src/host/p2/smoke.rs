@@ -194,6 +194,59 @@ pub(super) fn start(app: tauri::AppHandle, state: Shared) {
                 }
                 evidence.push(json!({"case":"speech-synchronized actual callbacks","passed":true,"channels":task.channels}));
             }
+            // Exercise the utility preparation/completion path with real Web Audio.
+            let (preview, reply, before_count) = {
+                let mut h = state.lock().unwrap();
+                let before_count = h.ai.memory.history(&a)?["messages"]
+                    .as_array()
+                    .unwrap()
+                    .len();
+                let reply = h.present(
+                    json!({"text":"试听等待此回复完整结束。","readMs":1500}),
+                    "host.user",
+                    Priority::User,
+                    false,
+                    60000,
+                    0,
+                )?;
+                (tools::prepare_preview(&mut h, &a, 60)?, reply, before_count)
+            };
+            wait(&state, 10, |h| {
+                h.scheduler.active().is_some_and(|t| t.id == reply)
+            })?;
+            let settings = state.lock().unwrap().ai.settings.clone();
+            let bytes = services::speech(&settings, "", "试听原文", "fixture-voice")?;
+            {
+                let mut h = state.lock().unwrap();
+                tools::complete_preview(&mut h, &a, preview.0, preview.1, &preview.2, Ok(bytes))?;
+                if h.scheduler.active().is_none_or(|t| t.id != reply) {
+                    return Err("试听抢占了现有回复".into());
+                }
+            }
+            wait(&state, 15, |h| task_done(h, preview.0))?;
+            {
+                let h = state.lock().unwrap();
+                let task = h
+                    .scheduler
+                    .tasks
+                    .iter()
+                    .find(|t| t.id == preview.0)
+                    .unwrap();
+                if task.status != Status::Completed
+                    || task.channels.get("audio").is_none_or(|s| s != "completed")
+                {
+                    return Err("试听未得到实际音频完成回执".into());
+                }
+                if h.ai.memory.history(&a)?["messages"]
+                    .as_array()
+                    .unwrap()
+                    .len()
+                    != before_count
+                {
+                    return Err("试听写入了对话历史".into());
+                }
+                evidence.push(json!({"case":"voice audition actual Web Audio, no preemption or history","passed":true,"channels":task.channels}));
+            }
             let cancelled = {
                 let mut h = state.lock().unwrap();
                 h.generate(

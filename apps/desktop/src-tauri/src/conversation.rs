@@ -38,6 +38,33 @@ impl Default for Profile {
     }
 }
 impl Profile {
+    pub fn normalize_languages(&mut self) -> Result<(), String> {
+        let choices: Value =
+            serde_json::from_str(include_str!("../../../../contracts/languages.json")).unwrap();
+        let resolve = |input: &str| {
+            choices
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|v| {
+                    v["value"] == input.trim()
+                        || v["aliases"].as_array().unwrap().iter().any(|a| {
+                            a.as_str()
+                                .is_some_and(|a| a.eq_ignore_ascii_case(input.trim()))
+                        })
+                })
+                .and_then(|v| v["value"].as_str())
+                .map(str::to_owned)
+        };
+        self.language = resolve(&self.language).ok_or("请从列表中选择回复语言")?;
+        if !self.read_language.trim().is_empty() {
+            self.read_language =
+                resolve(&self.read_language).ok_or("请从列表中选择朗读翻译目标语言")?;
+        } else {
+            self.read_language.clear();
+        }
+        Ok(())
+    }
     pub fn validate(&self) -> Result<(), String> {
         if self.character_name.trim().is_empty()
             || self.character_name.len() > 160

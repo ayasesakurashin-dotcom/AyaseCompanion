@@ -1356,6 +1356,11 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            p2::tools::service_probe,
+            p2::tools::preview_voice,
+            p2::tools::cancel_voice_preview,
+            p2::tools::create_voice,
+            p2::tools::refresh_voice,
             p2::save_services,
             p2::save_profile,
             p2::save_assets,

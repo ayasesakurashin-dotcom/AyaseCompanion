@@ -6,6 +6,7 @@ mod memory;
 mod services;
 #[cfg(any(test, feature = "smoke-test"))]
 mod test_http;
+mod voice_api;
 fn main() {
     host::run()
 }

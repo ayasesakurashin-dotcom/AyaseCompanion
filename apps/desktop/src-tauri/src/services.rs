@@ -103,7 +103,7 @@ impl Vault {
     pub fn open(root: &Path) -> Result<Self, String> {
         let path = root.join("services.sqlite3");
         let db = Connection::open(&path).map_err(|_| "无法打开服务设置")?;
-        db.execute_batch("CREATE TABLE IF NOT EXISTS config(id INTEGER PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS secrets(slot TEXT PRIMARY KEY, encrypted BLOB NOT NULL);").map_err(|_|"无法初始化凭据存储")?;
+        db.execute_batch("CREATE TABLE IF NOT EXISTS config(id INTEGER PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS secrets(slot TEXT PRIMARY KEY, encrypted BLOB NOT NULL); CREATE TABLE IF NOT EXISTS voice_models(instance TEXT NOT NULL,endpoint TEXT NOT NULL,id TEXT NOT NULL,value TEXT NOT NULL,PRIMARY KEY(instance,endpoint,id));").map_err(|_|"无法初始化凭据存储")?;
         Ok(Self { path })
     }
     pub fn settings(&self) -> Result<Settings, String> {
@@ -170,6 +170,26 @@ impl Vault {
     }
     pub fn public(&self, s: &Settings) -> Value {
         json!({"settings":s,"chatKeySet":self.key("chat",&s.chat.endpoint).is_ok_and(|s|!s.is_empty()),"voiceKeySet":self.key("voice",&s.voice.endpoint).is_ok_and(|s|!s.is_empty()),"memoryKeySet":self.key("memory",&s.memory.endpoint).is_ok_and(|s|!s.is_empty())})
+    }
+    pub fn voices(&self) -> Result<Vec<crate::voice_api::VoiceRecord>, String> {
+        let db = Connection::open(&self.path).map_err(|_| "音色记录不可读")?;
+        let mut stmt = db
+            .prepare("SELECT value FROM voice_models ORDER BY rowid")
+            .map_err(|_| "音色记录不可读")?;
+        let rows = stmt
+            .query_map([], |r| r.get::<_, String>(0))
+            .map_err(|_| "音色记录不可读")?;
+        let mut records = vec![];
+        for row in rows {
+            let text = row.map_err(|_| "音色记录不可读")?;
+            records.push(serde_json::from_str(&text).map_err(|_| "音色记录格式错误")?);
+        }
+        Ok(records)
+    }
+    pub fn save_voice(&self, record: &crate::voice_api::VoiceRecord) -> Result<(), String> {
+        let db = Connection::open(&self.path).map_err(|_| "音色记录不可写")?;
+        db.execute("INSERT INTO voice_models VALUES(?1,?2,?3,?4) ON CONFLICT(instance,endpoint,id) DO UPDATE SET value=excluded.value",params![record.instance_id,record.endpoint,record.id,serde_json::to_string(record).unwrap()]).map_err(|_|"音色记录保存失败")?;
+        Ok(())
     }
 }
 #[cfg(windows)]

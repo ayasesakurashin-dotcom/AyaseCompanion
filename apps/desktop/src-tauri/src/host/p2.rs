@@ -8,6 +8,8 @@ use std::{
     },
 };
 
+pub(super) mod tools;
+
 pub(super) struct Ai {
     vault: services::Vault,
     settings: services::Settings,
@@ -23,6 +25,7 @@ pub(super) struct Ai {
     history_cache: Value,
     public_services: Value,
     pub notice: String,
+    tools: tools::Tools,
 }
 impl Ai {
     pub fn open(root: &std::path::Path) -> Result<Self, String> {
@@ -31,6 +34,7 @@ impl Ai {
         settings.validate()?;
         fs::create_dir_all(root.join("audio-cache")).map_err(|_| "音声缓存不可写")?;
         let public_services = vault.public(&settings);
+        let tools = tools::Tools::open(&vault)?;
         Ok(Self {
             vault,
             settings,
@@ -45,6 +49,7 @@ impl Ai {
             history_owner: String::new(),
             history_cache: Value::Null,
             public_services,
+            tools,
             notice: String::new(),
         })
     }
@@ -76,7 +81,12 @@ impl Host {
         p
     }
     pub(super) fn ai_snapshot(&self) -> Value {
-        json!({"service":self.ai.public_services,"profile":self.profile(),"memory":if self.instance().is_some_and(|i|i.id==self.ai.history_owner){self.ai.history_cache.clone()}else{Value::Null},"notice":self.ai.notice,"working":self.ai.jobs.values().filter(|j|!j.finished).count(),"pending":self.ai.pending.len(),"audioAssets":self.package.as_ref().and_then(|p|p.manifest["assets"].as_object()).map(|assets|assets.iter().filter(|(_,v)|v["kind"]=="audio").map(|(id,_)|(id.clone(),self.asset_enabled(id))).collect::<BTreeMap<_,_>>())})
+        let owner = self.instance().map(|i| i.id.as_str()).unwrap_or("");
+        let scope = self
+            .instance()
+            .map(|i| format!("{}:{}", i.id, i.package_hash))
+            .unwrap_or_default();
+        json!({"voiceSamples":if scope==self.ai.tools.sample_scope{self.ai.tools.samples.clone()}else{vec![]},"voiceModels":self.ai.tools.voices.get(owner),"voicePreview":self.scheduler.tasks.iter().rev().find(|t|t.instance_id==owner&&t.plan["voicePreview"]==true),"service":self.ai.public_services,"profile":self.profile(),"memory":if self.instance().is_some_and(|i|i.id==self.ai.history_owner){self.ai.history_cache.clone()}else{Value::Null},"notice":self.ai.notice,"working":self.ai.jobs.values().filter(|j|!j.finished).count(),"pending":self.ai.pending.len(),"audioAssets":self.package.as_ref().and_then(|p|p.manifest["assets"].as_object()).map(|assets|assets.iter().filter(|(_,v)|v["kind"]=="audio").map(|(id,_)|(id.clone(),self.asset_enabled(id))).collect::<BTreeMap<_,_>>())})
     }
     pub(super) fn generate(
         &mut self,
@@ -185,7 +195,9 @@ impl Host {
             .iter()
             .filter(|t| {
                 !t.status.terminal()
-                    && (t.plan["stream"] == true || self.ai.jobs.contains_key(&t.id))
+                    && (t.plan["stream"] == true
+                        || t.plan["voicePreview"] == true
+                        || self.ai.jobs.contains_key(&t.id))
             })
             .map(|t| t.id)
             .collect::<Vec<_>>();
@@ -221,6 +233,7 @@ impl Host {
         valid
     }
     pub(super) fn ai_tick(&mut self) {
+        tools::tick(self);
         let now = self.now();
         let ids = self.ai.jobs.keys().copied().collect::<Vec<_>>();
         for id in ids {
@@ -643,9 +656,10 @@ pub(super) fn save_profile(
     window: WebviewWindow,
     state: State<Shared>,
     instance_id: String,
-    profile: conversation::Profile,
+    mut profile: conversation::Profile,
 ) -> Result<(), String> {
     control(&window)?;
+    profile.normalize_languages()?;
     profile.validate()?;
     let mut h = state.lock().unwrap();
     let mut store = h.store.clone();

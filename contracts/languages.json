@@ -1,0 +1,14 @@
+[
+  {"value":"简体中文","label":"中文（简体）","aliases":["中文","zh","zh-CN","zh-Hans","Chinese"]},
+  {"value":"繁体中文","label":"中文（繁体）","aliases":["繁體中文","zh-TW","zh-Hant"]},
+  {"value":"英语","label":"英语","aliases":["英文","en","en-US","en-GB","English"]},
+  {"value":"日语","label":"日语","aliases":["日文","ja","ja-JP","日本語","Japanese"]},
+  {"value":"韩语","label":"韩语","aliases":["韩文","ko","ko-KR","한국어","Korean"]},
+  {"value":"法语","label":"法语","aliases":["fr","French"]},
+  {"value":"德语","label":"德语","aliases":["de","German"]},
+  {"value":"西班牙语","label":"西班牙语","aliases":["es","Spanish"]},
+  {"value":"意大利语","label":"意大利语","aliases":["it","Italian"]},
+  {"value":"葡萄牙语","label":"葡萄牙语","aliases":["pt","Portuguese"]},
+  {"value":"俄语","label":"俄语","aliases":["ru","Russian"]},
+  {"value":"阿拉伯语","label":"阿拉伯语","aliases":["ar","Arabic"]}
+]
