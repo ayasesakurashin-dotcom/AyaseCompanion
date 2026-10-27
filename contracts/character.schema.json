@@ -1,15 +1,143 @@
 {
-  "$schema":"https://json-schema.org/draft/2020-12/schema",
-  "type":"object","required":["format","formatVersion","packageId","version","displayName","avatar","assets"],
-  "properties":{
-    "format":{"const":"ayase.character"},"formatVersion":{"type":"string","pattern":"^1\\.[0-9]+$"},
-    "packageId":{"type":"string","pattern":"^[a-zA-Z0-9][a-zA-Z0-9._-]{1,127}$"},
-    "version":{"type":"string","pattern":"^[0-9]+\\.[0-9]+\\.[0-9]+(-[a-zA-Z0-9.-]+)?$"},
-    "displayName":{"type":"string","minLength":1,"maxLength":160},
-    "identity":{"type":"object"},
-    "avatar":{"type":"object","required":["renderer","descriptor"],"properties":{"renderer":{"type":"string"},"descriptor":{"type":"string"},"fallback":{"type":"object"}}},
-    "assets":{"type":"object","additionalProperties":{"type":"object","required":["kind","path"],"properties":{"kind":{"enum":["image","audio","text","data"]},"path":{"type":"string","minLength":1,"maxLength":240},"sha256":{"type":"string","pattern":"^[0-9a-f]{64}$"}}}},
-    "pluginPresets":{"type":"array","maxItems":128,"items":{"type":"object","required":["presetId","pluginId","configVersion","enabled","config"],"properties":{"presetId":{"type":"string","minLength":1,"maxLength":128},"pluginId":{"type":"string","minLength":1,"maxLength":128},"configVersion":{"type":"string"},"configMode":{"enum":["overlay","complete"]},"enabled":{"type":"boolean"},"priority":{"enum":["background","normal","important"]},"config":{"type":"object"}}}},
-    "integrity":{"type":"object","additionalProperties":{"type":"string","pattern":"^[0-9a-f]{64}$"}}
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "format",
+    "formatVersion",
+    "packageId",
+    "version",
+    "displayName",
+    "avatar",
+    "assets"
+  ],
+  "properties": {
+    "format": {
+      "const": "ayase.character"
+    },
+    "formatVersion": {
+      "type": "string",
+      "pattern": "^1\\.[0-9]+$"
+    },
+    "packageId": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{1,127}$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[a-zA-Z0-9.-]+)?$"
+    },
+    "displayName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "identity": {
+      "type": "object"
+    },
+    "avatar": {
+      "type": "object",
+      "required": [
+        "renderer",
+        "descriptor"
+      ],
+      "properties": {
+        "renderer": {
+          "type": "string"
+        },
+        "descriptor": {
+          "type": "string"
+        },
+        "fallback": {
+          "type": "object"
+        }
+      }
+    },
+    "assets": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "kind",
+          "path"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "image",
+              "audio",
+              "text",
+              "data"
+            ]
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "pluginPresets": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "required": [
+          "presetId",
+          "pluginId",
+          "configVersion",
+          "enabled",
+          "config"
+        ],
+        "properties": {
+          "presetId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "pluginId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "configVersion": {
+            "type": "string"
+          },
+          "configMode": {
+            "enum": [
+              "overlay",
+              "complete"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "priority": {
+            "enum": [
+              "background",
+              "normal",
+              "important"
+            ]
+          },
+          "config": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "integrity": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      }
+    }
   }
 }

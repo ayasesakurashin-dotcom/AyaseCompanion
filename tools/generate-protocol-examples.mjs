@@ -4,7 +4,7 @@ const write=(file,value)=>{fs.mkdirSync(path.dirname(file),{recursive:true});fs.
 const time={type:'string',pattern:'^([01][0-9]|2[0-3]):[0-5][0-9]$'};
 const ttl={type:'integer',minimum:1,maximum:3600,default:300,title:'排队有效期（秒）'};
 const response=JSON.parse(fs.readFileSync('contracts/request.schema.json','utf8'));
-const manifest=(id,name,caps,defaults)=>({format:'ayase.plugin',formatVersion:'1.0',pluginId:id,version:'0.1.0',displayName:name,apiVersion:'1.0',configVersion:'1.0',runtime:{type:'declarative.v1',entry:'rules/main.json'},configSchema:'schemas/config.schema.json',defaultPriority:'normal',capabilities:caps,defaults});
+const manifest=(id,name,caps,defaults)=>({format:'ayase.plugin',formatVersion:'1.0',pluginId:id,version:'0.2.0',displayName:name,apiVersion:'1.0',configVersion:'1.0',runtime:{type:'declarative.v1',entry:'rules/main.json'},configSchema:'schemas/config.schema.json',defaultPriority:'normal',capabilities:caps,defaults});
 const present={type:'presentation.request',responseFromConfig:'/response',ttlSecondsFromConfig:'/ttlSeconds'};
 const wrap=(manifest,schema,subscriptions,rules)=>({manifest,schema,rules:{schemaVersion:'1.0',subscriptions,rules}});
 const allDay={id:'all-day',start:'00:00',end:'00:00',allDay:true,response:{mode:'fixed',variants:[{id:'hello',text:'你好，我在这里。',cue:'greeting'}]}};

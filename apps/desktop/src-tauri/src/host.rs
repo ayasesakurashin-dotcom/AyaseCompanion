@@ -1,4 +1,5 @@
 use crate::environment::{self, Facts};
+use crate::{conversation, memory, services};
 use ayase_core::{
     config,
     package::{self, Package, PackageReport},
@@ -18,6 +19,7 @@ use std::{
 };
 use tauri::{Manager, State, WebviewWindow};
 use uuid::Uuid;
+mod p2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -30,6 +32,10 @@ struct Instance {
     previous_packages: Vec<String>,
     draft: String,
     runtime: Runtime,
+    #[serde(default)]
+    profile: Option<conversation::Profile>,
+    #[serde(default)]
+    profile_revision: u64,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -102,9 +108,37 @@ struct Host {
     last_wall: i64,
     startup_sent: bool,
     renderer_ready: bool,
+    ai: p2::Ai,
 }
 type Shared = Arc<Mutex<Host>>;
+fn materialize_identity_assets(manifest: &mut Value, overrides: &Value) {
+    if let Some(identity) = overrides.get("identity") {
+        manifest["identity"] = config::effective(&manifest["identity"], &json!({}), identity);
+        if identity.get("persona").is_some() {
+            if let Some(identity) = manifest["identity"].as_object_mut() {
+                identity.remove("personaAsset");
+            }
+        }
+    }
+    if let Some(assets) = overrides["assetEnabled"].as_object() {
+        for (id, enabled) in assets {
+            if manifest["assets"][id]["kind"] == "audio" && enabled.is_boolean() {
+                manifest["assets"][id]["enabled"] = enabled.clone();
+            }
+        }
+    }
+}
 impl Host {
+    fn asset_enabled(&self, id: &str) -> bool {
+        self.instance()
+            .and_then(|i| i.overrides["assetEnabled"][id].as_bool())
+            .or_else(|| {
+                self.package
+                    .as_ref()
+                    .and_then(|p| p.manifest["assets"][id]["enabled"].as_bool())
+            })
+            .unwrap_or(true)
+    }
     fn open(root: PathBuf) -> Result<Self, String> {
         fs::create_dir_all(root.join("packages")).map_err(|e| e.to_string())?;
         let db = Connection::open(root.join("host.sqlite3")).map_err(|e| e.to_string())?;
@@ -112,6 +146,38 @@ impl Host {
         let stored = db.query_row("SELECT value FROM settings WHERE key='host'", [], |r| {
             r.get::<_, String>(0)
         });
+        // Snapshot the existing P0/P1 settings before adding P2 metadata. Packages
+        // are immutable and remain in place; this uses SQLite's consistent copy.
+        if stored.is_ok() {
+            let migrated: bool = db
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM settings WHERE key='p2-backup-created')",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(|_| "无法检查升级备份")?;
+            if !migrated {
+                let backup_dir = root.join("backups");
+                fs::create_dir_all(&backup_dir).map_err(|_| "无法创建升级前档案备份")?;
+                let backup = backup_dir.join("before-p2-host.sqlite3");
+                if !backup.exists() {
+                    db.execute("VACUUM INTO ?1", [backup.to_string_lossy().as_ref()])
+                        .map_err(|_| "无法备份升级前档案，原数据库已保留")?;
+                }
+                let check = Connection::open(&backup).map_err(|_| "升级备份不可读")?;
+                let status: String = check
+                    .query_row("PRAGMA quick_check", [], |r| r.get(0))
+                    .map_err(|_| "升级备份校验失败")?;
+                if status != "ok" {
+                    return Err("升级备份不完整，原数据库已保留".into());
+                }
+                db.execute(
+                    "INSERT INTO settings VALUES('p2-backup-created','true')",
+                    [],
+                )
+                .map_err(|_| "升级标记保存失败")?;
+            }
+        }
         let store: Store = match stored {
             Ok(text) => serde_json::from_str(&text)
                 .map_err(|e| format!("本地档案不可读，已保留原数据：{e}"))?,
@@ -122,6 +188,7 @@ impl Host {
         let facts = Arc::new(Mutex::new(Facts::default()));
         let env_settings = Arc::new(Mutex::new(environment::Settings::default()));
         env_settings.lock().unwrap().excluded = store.excluded.clone();
+        let ai = p2::Ai::open(&root)?;
         let mut h = Self {
             root,
             db,
@@ -136,6 +203,7 @@ impl Host {
             last_wall: 0,
             startup_sent: false,
             renderer_ready: false,
+            ai,
         };
         for hash in &h.store.installed {
             if let Ok(p) = h.load_package(hash) {
@@ -158,6 +226,11 @@ impl Host {
             }
         }
         h.scheduler.muted = h.store.muted;
+        for i in &h.store.instances {
+            if h.ai.memory.finalize_interrupted(&i.id).is_err() {
+                h.ai.notice = "部分伙伴上下文暂不可读，原数据已保留".into();
+            }
+        }
         Ok(h)
     }
     fn now(&self) -> u64 {
@@ -302,7 +375,13 @@ impl Host {
             match output {
                 Output::Present(response, ttl) => {
                     let random = (Uuid::new_v4().as_u128() >> 64) as f64 / u64::MAX as f64;
-                    if let Some(v) = plugin::choose_variant(&response, random) {
+                    if response["mode"] != "fixed" {
+                        if let Err(e) = self
+                            .generate(response, &c.owner, c.priority, true, ttl, c.revision, None)
+                        {
+                            self.ai.notice = e;
+                        }
+                    } else if let Some(v) = plugin::choose_variant(&response, random) {
                         if let Err(e) = self.present(v, &c.owner, c.priority, true, ttl, c.revision)
                         {
                             let now = self.now();
@@ -323,15 +402,7 @@ impl Host {
             }
         }
     }
-    fn present(
-        &mut self,
-        v: Value,
-        owner: &str,
-        priority: Priority,
-        proactive: bool,
-        ttl: u64,
-        revision: u64,
-    ) -> Result<u64, String> {
+    fn resolve_variant(&self, v: &Value, owner: &str) -> Result<(Value, Vec<String>), String> {
         let p = self.package.as_ref().ok_or("请先激活角色包")?;
         let i = self.instance().ok_or("没有活动角色")?;
         let mut plan = json!({"repeat":1});
@@ -348,7 +419,10 @@ impl Host {
             channels.push("text".into());
         }
         if let Some(id) = v["audioAsset"].as_str() {
-            if let Some(path) = p.manifest["assets"][id]["path"].as_str() {
+            if let Some(path) = p.manifest["assets"][id]["path"]
+                .as_str()
+                .filter(|_| self.asset_enabled(id))
+            {
                 if p.manifest["assets"][id]["kind"] == "audio"
                     && p.files.contains_key(path)
                     && !self.store.muted
@@ -388,6 +462,19 @@ impl Host {
                 }
             }
         }
+        Ok((plan, channels))
+    }
+    fn present(
+        &mut self,
+        v: Value,
+        owner: &str,
+        priority: Priority,
+        proactive: bool,
+        ttl: u64,
+        revision: u64,
+    ) -> Result<u64, String> {
+        let (plan, channels) = self.resolve_variant(&v, owner)?;
+        let i = self.instance().ok_or("没有活动角色")?;
         self.scheduler.submit(
             Request {
                 instance_id: i.id.clone(),
@@ -406,6 +493,7 @@ impl Host {
     }
     fn tick(&mut self) {
         let now = self.now();
+        self.ai_tick();
         let wall = Utc::now();
         if self.package.is_none() {
             return;
@@ -497,7 +585,7 @@ impl Host {
             facts.fullscreen_status = "采集超时 / 状态未知".into();
             facts.media_status = "采集超时 / 状态未知".into();
         }
-        json!({"version":"0.1.0","stage":"P0/P1 · 已验收","instance":self.instance(),"instances":self.store.instances.iter().map(|i|json!({"id":i.id,"name":i.name,"packageHash":i.package_hash})).collect::<Vec<_>>(),"library":self.store.library,
+        json!({"version":"0.2.0","stage":"P2 · 待实机验收","ai":self.ai_snapshot(),"instance":self.instance(),"instances":self.store.instances.iter().map(|i|json!({"id":i.id,"name":i.name,"packageHash":i.package_hash})).collect::<Vec<_>>(),"library":self.store.library,
             "package":self.package.as_ref().map(|p|&p.report),"manifest":self.package.as_ref().map(|p|&p.manifest),"model":self.package.as_ref().and_then(|p|p.model.as_ref()),"assetPaths":asset_paths,
             "plugins":plugins,"configured":known,"unknownPresets":unknown,"scheduler":self.scheduler.snapshot(),"facts":facts,"zoom":self.store.zoom,"bubble":self.store.bubble,"excluded":self.store.excluded,"dataDirectory":self.root.to_string_lossy()})
     }
@@ -570,6 +658,8 @@ fn activate(h: &mut Host, hash: &str, mode: &str) -> Result<(), String> {
             previous_packages: vec![],
             draft: String::new(),
             runtime: Runtime::default(),
+            profile: None,
+            profile_revision: 0,
         });
     } else {
         return Err("请选择 new 或 update".into());
@@ -641,6 +731,9 @@ fn rollback_package(window: WebviewWindow, state: State<Shared>) -> Result<(), S
     Ok(())
 }
 fn allow_assets(app: &tauri::AppHandle, h: &Host) {
+    let _ = app
+        .asset_protocol_scope()
+        .allow_directory(h.root.join("audio-cache"), true);
     if let Some(p) = &h.package {
         let _ = app.asset_protocol_scope().allow_directory(
             h.root.join("packages").join(&p.report.hash).join("content"),
@@ -815,6 +908,7 @@ async fn export_package(
             presets.push(preset);
         }
         manifest["pluginPresets"] = json!(presets);
+        materialize_identity_assets(&mut manifest, &overrides);
         let bytes = package::pack(p.files.clone(), manifest, "manifest.json")?;
         package::validate(&bytes)?;
         let target = PathBuf::from(path);
@@ -873,7 +967,7 @@ fn presentation_ack(
     let mut h = state.lock().unwrap();
     let now = h.now();
     let accepted = match event.as_str() {
-        "started" => h.scheduler.started(id, generation, now),
+        "started" => h.generation_start_valid(id) && h.scheduler.started(id, generation, now),
         "completed" => h.scheduler.channel(id, generation, &channel, false, now),
         "failed" => h.scheduler.channel(id, generation, &channel, true, now),
         "valid" => h.scheduler.valid(id, generation),
@@ -967,7 +1061,10 @@ fn user_control(
             store.bubble = preferences;
             h.commit(store)?;
         }
-        "stop" => h.scheduler.stop(now),
+        "stop" => {
+            h.scheduler.stop(now);
+            h.cancel_generations();
+        }
         "mute" => {
             let muted = value.as_bool().ok_or("需要布尔值")?;
             let mut store = h.store.clone();
@@ -1214,7 +1311,7 @@ pub fn run() {
                 .icon(tauri::image::Image::from_bytes(include_bytes!(
                     "../icons/icon.png"
                 ))?)
-                .tooltip("AyaseCompanion 0.1.0")
+                .tooltip("AyaseCompanion 0.2.0")
                 .menu(&menu)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => {
@@ -1237,7 +1334,11 @@ pub fn run() {
                 .build(app)?;
             clamp_pet(&app_handle, true);
             #[cfg(feature = "smoke-test")]
-            smoke::start(app.handle().clone(), app.state::<Shared>().inner().clone());
+            if std::env::var_os("AYASE_SMOKE_P2").is_some() {
+                p2::start_smoke(app.handle().clone(), app.state::<Shared>().inner().clone());
+            } else {
+                smoke::start(app.handle().clone(), app.state::<Shared>().inner().clone());
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -1255,6 +1356,13 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            p2::save_services,
+            p2::save_profile,
+            p2::save_assets,
+            p2::chat_request,
+            p2::text_progress,
+            p2::audio_segment_ack,
+            p2::memory_action,
             snapshot,
             import_package,
             activate_package,
@@ -1281,9 +1389,9 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    struct TestRoot(PathBuf);
+    pub(super) struct TestRoot(pub(super) PathBuf);
     impl TestRoot {
-        fn new() -> Self {
+        pub(super) fn new() -> Self {
             Self(std::env::temp_dir().join(format!("ayase-host-test-{}", Uuid::new_v4())))
         }
     }
@@ -1292,7 +1400,7 @@ mod tests {
             let _ = fs::remove_dir_all(&self.0);
         }
     }
-    fn archive(version: &str) -> Vec<u8> {
+    pub(super) fn archive(version: &str) -> Vec<u8> {
         let model = json!({"schemaVersion":"1.0","logicalSize":{"width":64,"height":64},"anchors":{"feet":{"x":0.5,"y":1},"bubble":{"x":0.5,"y":0}},"clips":{"idle":{"asset":"image","layout":{"type":"single"},"frameDurationMs":1000,"direction":"forward"}},"baseModes":{"idle":{"loop":"idle"}}});
         let files = BTreeMap::from([
             (

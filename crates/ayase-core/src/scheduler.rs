@@ -261,7 +261,7 @@ impl Scheduler {
         };
         true
     }
-    fn finish(&mut self, id: u64, status: Status, reason: &str, now: u64) {
+    pub fn finish(&mut self, id: u64, status: Status, reason: &str, now: u64) {
         let Some(t) = self
             .tasks
             .iter_mut()

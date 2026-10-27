@@ -20,6 +20,8 @@ tests/evidence/local/
 # Private acceptance notes, diagnostics and machine-specific build evidence.
 docs/validation/
 docs/P0-P1*.md
+docs/P[0-9]*-实机*.md
+docs/P[0-9]*-专项*.md
 *.local.json
 *.bundle
 *.pdb

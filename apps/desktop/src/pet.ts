@@ -13,8 +13,19 @@ export function setupPet(root:HTMLElement,bridge:PetBridge={invoke,assetUrl:conv
   const renderer=new SpriteRenderer(canvas);let loaded='',loading=false,current:Task|null=null,epoch=0;
   let baseCurrent:BaseTransition|null=null,baseAckPending=false;
   const audio=new TaskAudioPlayer();let ackPending=false;
+  let segment=0,segmentPlaying=false,audioEnded=false,audioFailed=false,lastProgress=0,lastProgressText='';
   const ack=(task:Task,channel:string,event:string)=>bridge.invoke<boolean>('presentation_ack',{id:task.id,generation:task.generation,channel,event,visualBase:channel==='animation'?canvas.dataset.base:undefined,visualKind:channel==='animation'?canvas.dataset.presentation:undefined});
-  const clear=(preserveBase=false)=>{epoch++;bubble.cancel();audio.stop();if(!preserveBase){renderer.cancel();baseCurrent=null;}current=null;};
+  const clear=(preserveBase=false)=>{epoch++;bubble.cancel();audio.stop();segment=0;segmentPlaying=false;audioEnded=false;audioFailed=false;lastProgress=0;lastProgressText='';if(!preserveBase){renderer.cancel();baseCurrent=null;}current=null;};
+  const streamAudio=(task:Task)=>{
+    if(audioEnded||segmentPlaying||task.channels.audio!=='pending')return;
+    const parts=task.plan.audioSegments??[];
+    while(parts[segment]?.failed){audioFailed=true;segment++;}
+    const part=parts[segment];
+    if(part?.path){segmentPlaying=true;const own=epoch;
+      const index=segment;
+      audio.play(bridge.assetUrl(part.path),120_000,failed=>{if(epoch!==own||current?.id!==task.id)return;void bridge.invoke('audio_segment_ack',{id:task.id,generation:task.generation,index,event:failed?'failed':'completed'});audioFailed ||= failed;segment++;segmentPlaying=false;streamAudio(current);},()=>{if(epoch===own&&current?.id===task.id)void bridge.invoke('audio_segment_ack',{id:task.id,generation:task.generation,index,event:'started'});});
+    }else if(task.plan.audioDone&&segment>=(task.plan.audioCount??parts.length)){audioEnded=true;void ack(task,'audio',audioFailed?'failed':'completed');}
+  };
   const startBase=async(transition:BaseTransition)=>{
     baseAckPending=true;
     const baseAck=(event:string)=>bridge.invoke<boolean>('base_transition_ack',{id:transition.id,generation:transition.generation,event,visualKind:canvas.dataset.presentation});
@@ -35,7 +46,9 @@ export function setupPet(root:HTMLElement,bridge:PetBridge={invoke,assetUrl:conv
       clear();current=task;const own=epoch;const alive=()=>epoch===own&&current?.id===task.id;
       const done=(c:string,failed=false)=>{if(alive())void ack(task,c,failed?'failed':'completed');};
       const plan=task.plan;
-      if(plan.text)bubble.start(plan.text,plan.readMs,failed=>done('text',failed));
+      const progress=(text:string)=>{if(!alive())return;const now=performance.now();if(text!==lastProgressText&&(now-lastProgress>=250||text===current?.plan.text)){lastProgress=now;lastProgressText=text;void bridge.invoke('text_progress',{id:task.id,generation:task.generation,text});}};
+      if(plan.stream){bubble.startStream(plan.text??'',plan.readMs,failed=>done('text',failed||!!current?.plan.serviceError),progress);bubble.append(plan.text??'',!!plan.streamDone);streamAudio(task);}
+      else if(plan.text)bubble.start(plan.text,plan.readMs,failed=>done('text',failed),progress);
       if(plan.clips?.length){try{renderer.playFinite(plan.clips,plan.repeat??1,()=>done('animation'),!!task.targetBase);}catch{done('animation',true);}}
       if(plan.audioPath&&task.channels.audio==='pending'){
         // Decode stalls and device failures release only the failed audio channel.
@@ -70,6 +83,7 @@ export function setupPet(root:HTMLElement,bridge:PetBridge={invoke,assetUrl:conv
     const active=s.scheduler.active;
     if(current&&(!active||active.id!==current.id||active.generation!==current.generation))clear(!!baseCurrent);
     if(current&&(s.scheduler.muted||active?.channels.audio!=='pending'))audio.stop();
+    if(current&&active){current=active;if(active.plan.stream){bubble.append(active.plan.text??'',!!active.plan.streamDone);streamAudio(active);}}
     if(active&&!current&&!ackPending&&!loading&&!baseCurrent)await start(active);
     if(base&&!baseCurrent&&!baseAckPending&&!loading)await startBase(base);
     // dragging and input visibility never cancel a presentation.

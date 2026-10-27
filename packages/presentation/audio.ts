@@ -8,6 +8,7 @@ interface Playback {
   source: AudioBufferSourceNode | null;
   timer: ReturnType<typeof setTimeout>;
   done: (failed: boolean) => void;
+  started?: () => void;
 }
 
 /** Companion voice clips use Web Audio without registering a media session.
@@ -21,11 +22,11 @@ export class TaskAudioPlayer {
     fetch: (url, options) => fetch(url, options),
   }) { this.backend = backend; }
 
-  play(url: string, deadlineMs: number, done: (failed: boolean) => void) {
+  play(url: string, deadlineMs: number, done: (failed: boolean) => void, started?: () => void) {
     this.stop();
     const playback: Playback = {
       controller: new AbortController(), context: null, source: null,
-      timer: setTimeout(() => this.finish(playback, true), deadlineMs), done,
+      timer: setTimeout(() => this.finish(playback, true), deadlineMs), done, started,
     };
     this.current = playback;
     void this.prepare(playback, url);
@@ -54,6 +55,7 @@ export class TaskAudioPlayer {
       source.connect(context.destination);
       source.onended = () => this.finish(playback, false);
       source.start();
+      playback.started?.();
     } catch {
       this.finish(playback, true);
     }

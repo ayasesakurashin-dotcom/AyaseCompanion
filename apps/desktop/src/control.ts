@@ -1,6 +1,7 @@
 import {invoke} from '@tauri-apps/api/core';
 import {open,save} from '@tauri-apps/plugin-dialog';
 import type {Json,Snapshot} from './types.ts';
+import {setupP2} from './p2.ts';
 import appIcon from '../src-tauri/icons/icon.png';
 
 const esc=(value:unknown)=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
@@ -10,8 +11,8 @@ const id=()=>crypto.randomUUID();
 export function setupControl(root:HTMLElement){
   let state:Snapshot|null=null,libraryKey='',pluginsKey='',assetsKey='',nameOwner='',nameDirty=false,bubbleDirty=false;
   root.innerHTML=`<div class="control-shell">
-    <header><img class="brand-mark" src="${appIcon}" alt="AyaseCompanion"><div><h1>AyaseCompanion</h1><p>你的桌面伙伴 · 离线原型</p></div><span class="version">0.1.0 <b>P0 / P1 · 已验收</b></span></header>
-    <div class="notice">当前版本支持离线互动。AI 与记忆将在后续阶段接入。</div>
+    <header><img class="brand-mark" src="${appIcon}" alt="AyaseCompanion"><div><h1>AyaseCompanion</h1><p>你的桌面伙伴</p></div><span class="version">0.2.0 <b>P2 · 实机验收候选</b></span></header>
+    <div class="notice">P2 加入统一人格、流式聊天、合成语音与独立记忆。请先配置服务；离线播放验证仍可使用。</div>
     <nav aria-label="控制台页面"><button class="selected" data-tab="home">伙伴</button><button data-tab="play">播放验证</button><button data-tab="plugins">行为插件</button><button data-tab="diagnostics">运行记录</button></nav>
     <div id="message" role="status" aria-live="polite"></div>
     <section data-panel="home">
@@ -22,7 +23,7 @@ export function setupControl(root:HTMLElement){
       <div class="settings-row"><label>当前伙伴名称 <input id="instance-name" maxlength="80" placeholder="为这位伙伴取个名字"></label><button data-action="rename">保存名称</button></div>
       <details class="bubble-settings"><summary>气泡外观与阅读</summary><p>气泡跟随角色大小，字体单独调整；读完自动收起。设置保存在本机，后续纳入气泡主题。</p><div class="grid-two"><label>文字动画<select id="bubble-animation"><option value="typewriter">打字机</option><option value="none">立即显示</option></select></label><label>显现速度（字 / 秒）<input id="bubble-speed" type="number" min="10" max="80" value="30"></label><label>字号（像素）<input id="bubble-font" type="number" min="12" max="24" value="15"></label><label>每页最少阅读时间（毫秒）<input id="bubble-read" type="number" min="1000" max="10000" value="2800"></label></div><button data-action="save-bubble" class="primary">保存气泡设置</button><p class="hint">完整显示一页后才开始阅读计时；较长页面会自动延长。播放验证中的阅读时间可单独覆盖本值。</p></details>
       <div id="library" class="list empty">还没有素材包。先导入本次提供的 Ema 验证包。</div>
-      <div class="actions bottom"><button data-action="export">导出当前角色包</button><label>导出包版本 <input id="export-version" value="0.1.0" size="12"></label><button data-action="exit" class="quiet">退出应用</button></div>
+      <div class="actions bottom"><button data-action="export">导出当前角色包</button><label>导出包版本 <input id="export-version" value="0.2.0" size="12"></label><button data-action="exit" class="quiet">退出应用</button></div>
       <details><summary>全屏检测范围与排除应用</summary><p>仅检测桌宠所在显示器的前台无标题栏全屏窗口；有标题栏的最大化窗口不算全屏。排除项填进程文件名，以逗号分隔。媒体检测使用 Windows 媒体会话，不支持该接口的播放器不会被识别。</p><label>排除应用 <input id="excluded" placeholder="example.exe, another.exe"></label><button data-action="save-excluded">保存</button></details>
     </section>
     <section data-panel="play" hidden>
@@ -47,6 +48,7 @@ export function setupControl(root:HTMLElement){
     </section>
     <dialog id="plugin-editor"><form method="dialog"><div class="section-title"><h2 id="editor-title">插件配置</h2><button value="cancel" aria-label="关闭编辑器">×</button></div><p>修改只保存在当前伙伴的本地覆盖中。</p><div class="grid-two"><label class="switch"><input id="edit-enabled" type="checkbox">启用这份配置</label><label>优先级<select id="edit-priority"><option value="background">后台</option><option value="normal">普通</option><option value="important">重要</option></select></label></div><div id="schema-form"></div><details><summary>完整配置（保留未知字段）</summary><textarea id="edit-json" rows="12" spellcheck="false"></textarea><button type="button" data-action="apply-json">应用到表单</button></details><p id="editor-error" role="alert"></p><div class="actions"><button type="button" class="primary" data-action="save-preset">保存配置</button><button value="cancel">取消</button></div></form></dialog>
   </div>`;
+  const updateP2=setupP2(root);
   const $=<T extends HTMLElement=HTMLElement>(s:string)=>root.querySelector<T>(s)!;
   const value=(s:string)=>$<HTMLInputElement>(s).value;
   const message=(s:string,error=false)=>{const el=$('#message');el.textContent=s;el.className=error?'error':'success';};
@@ -121,6 +123,7 @@ export function setupControl(root:HTMLElement){
   $('#instance-name').addEventListener('input',()=>{nameDirty=true;});
   const date=new Date();date.setHours(23,0,0,0);$<HTMLInputElement>('#sim-time').value=new Date(+date-date.getTimezoneOffset()*60_000).toISOString().slice(0,16);
   return (s:Snapshot)=>{
+    updateP2(s);
     state=s;$('#active-name').textContent=s.instance?.name??'尚未激活';$('#active-detail').textContent=s.package?`${s.package.id} · ${s.package.version}`:'导入角色包后，选择“创建新伙伴”。';
     if(nameOwner!==(s.instance?.id??''))nameDirty=false;
     if(!nameDirty)$<HTMLInputElement>('#instance-name').value=s.instance?.name??'';

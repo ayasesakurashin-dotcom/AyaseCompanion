@@ -1,11 +1,11 @@
-# 1.0 协议的 P0/P1 实现补充
+# 1.0 协议的 P0—P2 实现补充
 
 设计草案保存在 docs/02-protocols.md。本目录与 Rust 校验器共同定义当前可执行范围。
 
 - character：ZIP 根 manifest.json，保留未知字段、未知插件配置及文件字节。
 - sprite：单图、网格、显式矩形；正放、倒放、往返；可选逐帧时长；统一逻辑画布和锚点。
 - plugin / rules：声明式订阅与动作，能力声明和配置引用均校验，不支持任意脚本。
-- request：P1 仅支持 fixed 配对回复；generated 等模式在 P2 接入。
+- request：P1 的 fixed 配对回复继续兼容；P2 支持 generated 和 generated-with-fallback，统一使用实例人格与宿主服务设置。
 - theme：受限数据格式预留；主题包编辑和导入界面在 P4，不宣称本轮支持主题制作。
 
 ## JSON Schema 共同子集
@@ -45,3 +45,13 @@ Rust scheduler.rs 是权威状态机：queued / preparing / ready / starting / p
 动画完成回执可附 `visualBase`（idle/music/quiet）与 `visualKind`（base/finite）；只有任务/代次/通道回执有效时，宿主才写入 `animation-return` 诊断。它描述渲染器实际选择的恢复状态，不授予额外呈现权。`base-fallback` 记录被撤销循环的原模式、目标和关联互动任务。
 
 base-transition-planned/started/ended 记录完整退出的授权与收尾，base-transition-rendered 表示实际有限片段完成回执。已开始的过渡按原规则完整播放，最新基础请求在之后重新求解。
+
+## P2 请求与私有运行身份
+
+response.mode 支持 fixed、generated、generated-with-fallback。fixed 必须提供配对 variants；generated 必须提供 intent；generated-with-fallback 还必须有明确 fallback 变体。voice.mode 可为 off / tts；voice.presentationPolicy 可为 text-first / speech-synchronized。它们均不携带人格、实例 ID、bank 或凭据。
+
+角色资产可用 enabled:false 表示可选固定音声停用；当前只解释 audio 类型，原始文件和未知引用仍保留。人格导出物化 identity 的已知作者字段并保留未知字段，不包含本机音色绑定。
+
+P2 运行的文字计划使用增量累积正文和 streamDone；语音使用有序 audioSegments、audioCount、audioDone，解码和播放回执带任务 ID/代次/段序号。正常通道完成仍由原调度器聚合；断流按失败收尾并记录实际显示部分。所有异步数据均受原实例、历史 epoch 和取消令牌限制。
+
+实现与配置见 docs/adr/0002-p2-services-memory.md、docs/p2-user-guide.md。实机记录只留本机。

@@ -57,6 +57,9 @@ export class BubblePresenter {
   private signature='';
   private maxTextHeight=0;
   private phase:'off'|'revealing'|'reading'|'closing'='off';
+  private streaming=false;
+  private waiting=false;
+  private progress:((text:string)=>void)|null=null;
 
   private element:HTMLElement;
   constructor(element:HTMLElement){
@@ -77,14 +80,25 @@ export class BubblePresenter {
     this.element.style.maxHeight=`${geometry.maxHeight}px`;
     this.element.style.setProperty('--bubble-font-size',`${preferences.fontSize}px`);
     this.maxTextHeight=geometry.maxHeight-44;
-    if(this.done&&this.phase!=='closing')this.showPage(true);
+    if(this.done&&!this.waiting&&this.phase!=='closing')this.showPage(true);
   }
-  start(text:string,readMs:number|undefined,done:(failed?:boolean)=>void){
+  start(text:string,readMs:number|undefined,done:(failed?:boolean)=>void,progress?:((text:string)=>void)){
     this.cancel();this.all=graphemes(text.replace(/\r\n/g,'\n'));this.taskReadMs=readMs;this.done=done;
+    this.progress=progress??null;
     this.showPage(false);
   }
+  startStream(text:string,readMs:number|undefined,done:(failed?:boolean)=>void,progress:(text:string)=>void){
+    this.cancel();this.streaming=true;this.taskReadMs=readMs;this.done=done;this.progress=progress;
+    this.all=graphemes(text.replace(/\r\n/g,'\n'));if(this.all.length)this.showPage(false);else this.waiting=true;
+  }
+  append(text:string,ended:boolean){
+    if(!this.done)return;
+    const normalized=text.replace(/\r\n/g,'\n');if(!normalized.startsWith(this.all.join('')))return;
+    this.all=graphemes(normalized);this.streaming=!ended;
+    if(this.waiting){if(this.pageStart<this.all.length){this.waiting=false;this.showPage(false);}else if(ended)this.finish();}
+  }
   cancel(){
-    ++this.generation;clearTimeout(this.timer);this.done=null;this.phase='off';this.all=[];this.pageStart=0;this.revealed=0;
+    ++this.generation;clearTimeout(this.timer);this.done=null;this.phase='off';this.all=[];this.pageStart=0;this.revealed=0;this.streaming=false;this.waiting=false;this.progress=null;
     this.element.classList.add('hidden');this.element.classList.remove('closing');this.element.dataset.phase='off';
     this.text.textContent='';this.counter.textContent='';
   }
@@ -118,11 +132,12 @@ export class BubblePresenter {
     const reveal=()=>{
       this.revealed=Math.min(chars.length,already+revealCount(performance.now()-start,chars.length,this.preferences));
       this.text.textContent=chars.slice(0,this.revealed).join('');
+      this.progress?.(this.all.slice(0,this.pageStart+this.revealed).join(''));
       if(this.revealed<chars.length){this.later(reveal,25);return;}
       this.phase='reading';this.element.dataset.phase='reading';
       this.later(()=>{
         this.pageStart+=chars.length;this.revealed=0;
-        if(this.pageStart<this.all.length)this.showPage(false);else this.finish();
+        if(this.pageStart<this.all.length)this.showPage(false);else if(this.streaming){this.waiting=true;this.phase='reading';}else this.finish();
       },readingTime(chars.length,this.preferences,this.taskReadMs));
     };
     reveal();

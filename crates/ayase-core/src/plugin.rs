@@ -115,8 +115,25 @@ pub fn valid_time(s: &str) -> bool {
 }
 pub fn validate_response(response: &Value) -> Result<(), String> {
     schema::validate(&schema::contract("request"), response)?;
+    if response["mode"] != "fixed" {
+        if response["intent"]
+            .as_str()
+            .is_none_or(|s| s.trim().is_empty())
+        {
+            return Err("生成回复需要明确目的".into());
+        }
+        if response["mode"] == "generated-with-fallback" {
+            validate_response(
+                &serde_json::json!({"mode":"fixed","variants":response["fallback"]}),
+            )?;
+        }
+        return Ok(());
+    }
     let mut ids = BTreeSet::new();
-    for v in response["variants"].as_array().unwrap() {
+    for v in response["variants"]
+        .as_array()
+        .ok_or("固定回复需要变体列表")?
+    {
         if !ids.insert(v["id"].as_str().unwrap()) {
             return Err("回复变体 id 重复".into());
         }

@@ -82,7 +82,8 @@ fieldset{border:1px solid var(--line);border-radius:8px;margin:0;padding:10px 14
 #editor-error:empty{display:none}
 #editor-error{padding:10px;margin:10px 0;border-radius:6px}
 .input-shell{padding:12px;background:#fcf7fb;height:100vh}
-.input-shell textarea{resize:none}
+.input-shell form{display:flex;flex-direction:column;height:100%}
+.input-shell textarea{resize:none;flex:1;min-height:42px;margin-top:5px}
 .input-footer{display:flex;gap:8px;align-items:center;margin-top:7px}
 .input-footer span{font-size:11px;color:#8b758c;margin-right:auto}
 .input-footer button{font-size:12px;padding:6px 9px}

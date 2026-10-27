@@ -3,7 +3,7 @@
     "format": "ayase.plugin",
     "formatVersion": "1.0",
     "pluginId": "ayase.media-response",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "displayName": "媒体基础姿态",
     "apiVersion": "1.0",
     "configVersion": "1.0",

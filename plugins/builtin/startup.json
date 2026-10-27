@@ -3,7 +3,7 @@
     "format": "ayase.plugin",
     "formatVersion": "1.0",
     "pluginId": "ayase.startup-greeting",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "displayName": "启动问候",
     "apiVersion": "1.0",
     "configVersion": "1.0",
@@ -94,13 +94,17 @@
               "$schema": "https://json-schema.org/draft/2020-12/schema",
               "type": "object",
               "required": [
-                "mode",
-                "variants"
+                "mode"
               ],
               "additionalProperties": false,
               "properties": {
                 "mode": {
-                  "const": "fixed"
+                  "enum": [
+                    "fixed",
+                    "generated",
+                    "generated-with-fallback"
+                  ],
+                  "title": "回复来源：fixed 固定 / generated 生成 / generated-with-fallback 生成并设后备"
                 },
                 "variants": {
                   "type": "array",
@@ -169,7 +173,107 @@
                         "maximum": 30000
                       }
                     }
-                  }
+                  },
+                  "title": "固定回复变体"
+                },
+                "intent": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2000,
+                  "title": "统一人格生成的互动目的"
+                },
+                "fallback": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 64,
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "id"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "weight": {
+                        "type": "number",
+                        "minimum": 0.001,
+                        "maximum": 10000
+                      },
+                      "text": {
+                        "anyOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "string",
+                            "maxLength": 12000
+                          }
+                        ]
+                      },
+                      "textAsset": {
+                        "anyOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "string"
+                          }
+                        ]
+                      },
+                      "audioAsset": {
+                        "anyOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "string"
+                          }
+                        ]
+                      },
+                      "cue": {
+                        "anyOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "string"
+                          }
+                        ]
+                      },
+                      "readMs": {
+                        "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 30000
+                      }
+                    }
+                  },
+                  "title": "生成失败时明确使用的固定后备"
+                },
+                "cue": {
+                  "type": "string",
+                  "maxLength": 128
+                },
+                "voice": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "mode": {
+                      "enum": [
+                        "off",
+                        "tts"
+                      ]
+                    },
+                    "presentationPolicy": {
+                      "enum": [
+                        "text-first",
+                        "speech-synchronized"
+                      ]
+                    }
+                  },
+                  "title": "生成回复的语音策略"
                 }
               }
             }

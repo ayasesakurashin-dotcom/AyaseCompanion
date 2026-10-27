@@ -23,7 +23,7 @@ while (args.length) {
 }
 if (!ref || binaries.some(value => !value) || ref.startsWith('refs/private/')) throw new Error('Invalid public audit target');
 const findings = new Set();
-const excluded = /^(?:artifacts|local-assets|docs\/validation)(?:\/|$)|^docs\/P0-P1.*\.md$|(?:^|\/)(?:\.env(?!\.example$)|ayase-diagnostics-|codex-clipboard-)|\.(?:bundle|pdb|dmp|db|sqlite3)(?:$|-)|\.local\.json$/i;
+const excluded = /^(?:artifacts|local-assets|docs\/validation)(?:\/|$)|^docs\/(?:P0-P1.*|P\d.*(?:实机|专项).*)\.md$|(?:^|\/)(?:\.env(?!\.example$)|ayase-diagnostics-|codex-clipboard-)|\.(?:bundle|pdb|dmp|db|sqlite3)(?:$|-)|\.local\.json$/i;
 const secrets = [
   /\bgh[pousr]_[A-Za-z0-9]{30,}\b/,
   /\bgithub_pat_[A-Za-z0-9_]{40,}\b/,

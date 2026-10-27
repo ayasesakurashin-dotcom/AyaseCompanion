@@ -1,0 +1,47 @@
+import {invoke} from '@tauri-apps/api/core';
+import type {Json,Snapshot} from './types.ts';
+
+export function setupP2(root:HTMLElement){
+  root.querySelector('nav')!.insertAdjacentHTML('beforeend','<button data-tab="ai">人格、服务与记忆</button>');
+  root.querySelector('nav')!.insertAdjacentHTML('afterend',`<section data-panel="ai" hidden>
+    <h2>当前伙伴的人格与声音</h2><p>聊天、生成问候和生成提醒共用这一份人格。音色和记忆属于伙伴实例。</p>
+    <form data-profile><div class="grid-two"><label>角色称呼<input name="characterName" required maxlength="160"></label><label>对你的称呼<input name="userAddress" maxlength="160"></label></div>
+    <label>人格<textarea name="persona" rows="5" maxlength="12000"></textarea></label>
+    <div class="grid-two"><label>回复语言<input name="language"></label><label>Fish 音色 ID / 语音 voice<input name="voiceId" maxlength="256"></label>
+    <label>呈现策略<select name="presentationPolicy"><option value="text-first">文字优先</option><option value="speech-synchronized">首段音声就绪后开始</option></select></label><label>发送新消息时<select name="sendPolicy"><option value="wait-current">等待当前整条回复（默认）</option><option value="interrupt-current">停止当前回复</option></select></label>
+    <label>朗读翻译目标语言（留空直接朗读原文）<input name="readLanguage" maxlength="80"></label></div>
+    <label><input name="voiceEnabled" type="checkbox">朗读生成回复（AI 合成语音）</label>
+    <label><input name="syncMemory" type="checkbox">允许将此后明确发送的用户消息同步至记忆服务；不自动同步助手猜测或主动问候</label>
+    <button class="primary">保存当前伙伴设置</button></form>
+    <h2>本机服务设置</h2><p>输入完整的 API 基础地址。聊天基础地址通常以 /v1 结尾；Hindsight 填服务根地址。HTTPS 服务或本机 HTTP 服务均可。密钥独立加密保存，空白表示保留当前地址已有密钥；换地址需重新填写。</p>
+    <form data-services><div data-providers></div><div class="grid-two"><label>语音接口<select name="voiceKind"><option value="fish">Fish Audio（优先）</option><option value="openai">OpenAI 兼容语音</option></select></label><label>每条生成文字上限<input name="maxChars" type="number" min="200" max="4000"></label><label>服务超时（秒）<input name="timeoutSeconds" type="number" min="15" max="120"></label></div><button class="primary">保存服务设置</button></form>
+    <details><summary>当前伙伴的固定音声素材</summary><p>取消勾选表示此伙伴后续任务不使用该音声。导出会保存停用标记并保留原文件，避免损坏未知插件的引用。</p><form data-audio-assets><div data-audio-list></div><button>保存音声素材设置</button></form></details>
+    <h2>聊天与记忆</h2><p>从桌宠的独立输入框发送聊天；播放验证页仍可独立使用固定文字、音声和动作。下面记录只属于当前伙伴。</p>
+    <p role="status" data-ai-status></p><div class="actions"><button data-memory="summary">整理有界摘要</button><button data-memory="clear-history">仅清空本地历史</button><button class="danger" data-memory="forget">遗忘本地与远端记忆</button></div>
+    <details><summary>摘要与同步状态</summary><p data-memory-status></p><pre data-summary></pre><small data-bank></small></details><div data-history></div>
+    <dialog data-memory-confirm><h3>确认记忆操作</h3><p data-memory-description></p><div class="actions"><button data-confirm-memory class="danger">确认操作</button><button data-cancel-memory>取消</button></div></dialog>
+  </section>`);
+  const q=<T extends HTMLElement=HTMLElement>(s:string)=>root.querySelector<T>(s)!;
+  const profile=q<HTMLFormElement>('[data-profile]'),services=q<HTMLFormElement>('[data-services]');
+  q('[data-providers]').innerHTML=[['chat','聊天服务'],['voice','语音服务'],['memory','Hindsight 记忆服务']].map(([key,label])=>`<fieldset><legend>${label}</legend><label><input name="${key}Enabled" type="checkbox">启用</label><label>基础地址<input name="${key}Endpoint" type="url" autocomplete="off"></label>${key!=='memory'?`<label>模型名称<input name="${key}Model" autocomplete="off"></label>`:''}<label>API 密钥<input name="${key}Key" type="password" autocomplete="new-password"></label><label><input name="${key}Delete" type="checkbox">清除这个地址已保存的密钥</label></fieldset>`).join('');
+  const field=(form:HTMLFormElement,name:string)=>form.elements.namedItem(name) as HTMLInputElement;
+  const get=(form:HTMLFormElement,name:string)=>field(form,name).value;
+  const check=(form:HTMLFormElement,name:string)=>field(form,name).checked;
+  let owner='',profileDirty=false,servicesDirty=false,lastSettings='',historyKey='',snapshot:Snapshot|null=null,pendingAction='',pendingOwner='',audioKey='',audioDirty=false;
+  let localUntil=0;const status=(text:string,local=true)=>{if(local)localUntil=performance.now()+5000;else if(performance.now()<localUntil)return;q('[data-ai-status]').textContent=text;};
+  profile.addEventListener('input',()=>{profileDirty=true;});services.addEventListener('input',()=>{servicesDirty=true;});
+  q('[data-audio-assets]').addEventListener('input',()=>{audioDirty=true;});
+  q('[data-audio-assets]').addEventListener('submit',event=>{event.preventDefault();const instanceId=owner,enabled:Json={};root.querySelectorAll<HTMLInputElement>('[data-audio-list] input').forEach(input=>{enabled[input.dataset.asset!]=input.checked;});void invoke('save_assets',{instanceId,enabled}).then(()=>{if(owner===instanceId)audioDirty=false;status('当前伙伴音声素材设置已保存。');}).catch(e=>status(String(e)));});
+  profile.addEventListener('submit',event=>{event.preventDefault();const instanceId=owner;const data:Json={};for(const name of ['characterName','userAddress','persona','language','voiceId','presentationPolicy','sendPolicy','readLanguage'])data[name]=get(profile,name);for(const name of ['voiceEnabled','syncMemory'])data[name]=check(profile,name);void invoke('save_profile',{instanceId,profile:data}).then(()=>{if(owner===instanceId)profileDirty=false;status('伙伴设置已保存，下次回复生效。');}).catch(e=>status(String(e)));});
+  services.addEventListener('submit',event=>{event.preventDefault();const settings:Json={voiceKind:get(services,'voiceKind'),maxChars:Number(get(services,'maxChars')),timeoutSeconds:Number(get(services,'timeoutSeconds'))},keys:Json={};for(const key of ['chat','voice','memory']){settings[key]={enabled:check(services,key+'Enabled'),endpoint:get(services,key+'Endpoint').trim(),model:key==='memory'?'':get(services,key+'Model').trim()};keys[key]=get(services,key+'Key');keys[key+'Delete']=check(services,key+'Delete');}void invoke('save_services',{settings,keys}).then(()=>{servicesDirty=false;lastSettings='';for(const key of ['chat','voice','memory']){field(services,key+'Key').value='';field(services,key+'Delete').checked=false;}status('服务设置已保存。请发送一条聊天验证连接；服务错误只出现在状态区。');}).catch(e=>status(String(e)));});
+  q('[data-cancel-memory]').onclick=()=>q<HTMLDialogElement>('[data-memory-confirm]').close();
+  root.querySelectorAll<HTMLButtonElement>('[data-memory]').forEach(button=>button.onclick=()=>{const action=button.dataset.memory!;if(!owner)return;if(action==='summary'){void invoke('memory_action',{instanceId:owner,action}).catch(e=>status(String(e)));return;}pendingAction=action;pendingOwner=owner;q('[data-memory-description]').textContent=action==='forget'?'仅遗忘当前伙伴：取消其生成回复、清空本地历史和摘要、切换独立记忆空间。远端旧空间删除排队执行；服务离线时会保留待办。其他伙伴不受影响。':'仅清空当前伙伴的本地对话和摘要，并取消关联生成回复。已同步的远端长期记忆保留。';q<HTMLDialogElement>('[data-memory-confirm]').showModal();});
+  q('[data-confirm-memory]').onclick=()=>{q<HTMLDialogElement>('[data-memory-confirm]').close();void invoke('memory_action',{instanceId:pendingOwner,action:pendingAction}).catch(e=>status(String(e)));};
+  return(s:Snapshot)=>{snapshot=s;const ai=s.ai;if(!ai)return;const newOwner=s.instance?.id??'';if(newOwner!==owner){owner=newOwner;profileDirty=false;historyKey='';audioDirty=false;audioKey='';q<HTMLDialogElement>('[data-memory-confirm]').close();}
+    const assetKey=JSON.stringify(ai.audioAssets);if(!audioDirty&&assetKey!==audioKey){audioKey=assetKey;const list=q('[data-audio-list]');list.replaceChildren();for(const [id,enabled]of Object.entries(ai.audioAssets??{})){const label=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.checked=!!enabled;input.dataset.asset=id;label.append(input,document.createTextNode(id));list.append(label);}}
+    if(!profileDirty){for(const [name,value]of Object.entries(ai.profile??{})){const input=field(profile,name);if(!input)continue;if(input.type==='checkbox')input.checked=!!value;else input.value=String(value??'');}}
+    const service=ai.service??{},signature=JSON.stringify(service);if(!servicesDirty&&signature!==lastSettings){lastSettings=signature;const settings=service.settings??{};for(const key of ['chat','voice','memory']){field(services,key+'Enabled').checked=!!settings[key]?.enabled;field(services,key+'Endpoint').value=settings[key]?.endpoint??'';if(key!=='memory')field(services,key+'Model').value=settings[key]?.model??'';field(services,key+'Key').placeholder=service[key+'KeySet']?'已加密保存；留空保留':'未保存密钥（无认证本机服务可留空）';}for(const name of ['voiceKind','maxChars','timeoutSeconds'])field(services,name).value=String(settings[name]??'');}
+    const memory=ai.memory??{},key=JSON.stringify(memory);if(key!==historyKey){historyKey=key;const box=q('[data-history]');box.replaceChildren();for(const item of memory.messages??[]){const article=document.createElement('article'),label=document.createElement('small'),content=document.createElement('p');label.textContent=`${item.role==='user'?'你':'伙伴'} · ${item.status?.startsWith('partial')?'部分呈现':item.source==='chat'?'聊天':'主动互动'} · ${item.created}`;content.textContent=item.content;article.append(label,content);box.append(article);}q('[data-summary]').textContent=memory.summary||'尚无摘要；原文独立保留。';q('[data-memory-status]').textContent=`本地历史代次 ${memory.epoch??0} · 待同步 ${memory.pendingSync??0} 条 · 摘要水位 ${memory.watermark??0}`;q('[data-bank]').textContent=memory.bank?`由宿主管理的独立 bank：${memory.bank}`:'';}
+    status(ai.notice||'服务可独立关闭，未配置时仍可使用离线播放。',false);void snapshot;
+  };
+}
