@@ -13,18 +13,22 @@ export function setupPet(root:HTMLElement,bridge:PetBridge={invoke,assetUrl:conv
   const renderer=new SpriteRenderer(canvas);let loaded='',loading=false,current:Task|null=null,epoch=0;
   let baseCurrent:BaseTransition|null=null,baseAckPending=false;
   const audio=new TaskAudioPlayer();let ackPending=false;
-  let segment=0,segmentPlaying=false,audioEnded=false,audioFailed=false,lastProgress=0,lastProgressText='';
+  let segmentPlaying=false,audioEnded=false,audioFailed=false,lastProgress=0,lastProgressText='';
   const ack=(task:Task,channel:string,event:string)=>bridge.invoke<boolean>('presentation_ack',{id:task.id,generation:task.generation,channel,event,visualBase:channel==='animation'?canvas.dataset.base:undefined,visualKind:channel==='animation'?canvas.dataset.presentation:undefined});
-  const clear=(preserveBase=false)=>{epoch++;bubble.cancel();audio.stop();segment=0;segmentPlaying=false;audioEnded=false;audioFailed=false;lastProgress=0;lastProgressText='';if(!preserveBase){renderer.cancel();baseCurrent=null;}current=null;};
+  const clear=(preserveBase=false)=>{epoch++;bubble.cancel();audio.stop();segmentPlaying=false;audioEnded=false;audioFailed=false;lastProgress=0;lastProgressText='';if(!preserveBase){renderer.cancel();baseCurrent=null;}current=null;};
   const streamAudio=(task:Task)=>{
-    if(audioEnded||segmentPlaying||task.channels.audio!=='pending')return;
+    if(audioEnded||segmentPlaying||task.channels.audio!=='pending'||!task.plan.audioDone)return;
     const parts=task.plan.audioSegments??[];
-    while(parts[segment]?.failed){audioFailed=true;segment++;}
-    const part=parts[segment];
-    if(part?.path){segmentPlaying=true;const own=epoch;
-      const index=segment;
-      audio.play(bridge.assetUrl(part.path),120_000,failed=>{if(epoch!==own||current?.id!==task.id)return;void bridge.invoke('audio_segment_ack',{id:task.id,generation:task.generation,index,event:failed?'failed':'completed'});audioFailed ||= failed;segment++;segmentPlaying=false;streamAudio(current);},()=>{if(epoch===own&&current?.id===task.id)void bridge.invoke('audio_segment_ack',{id:task.id,generation:task.generation,index,event:'started'});});
-    }else if(task.plan.audioDone&&segment>=(task.plan.audioCount??parts.length)){audioEnded=true;void ack(task,'audio',audioFailed?'failed':'completed');}
+    audioFailed=parts.some(part=>!part||part.failed);
+    const ready=parts.flatMap((part,index)=>part?.path?[{index,url:bridge.assetUrl(part.path)}]:[]);
+    segmentPlaying=true;const own=epoch;
+    audio.playSequence(ready,615_000,failed=>{
+      if(epoch!==own||current?.id!==task.id)return;
+      segmentPlaying=false;audioEnded=true;audioFailed ||= failed;
+      void ack(task,'audio',audioFailed?'failed':'completed');
+    },(index,event)=>{
+      if(epoch===own&&current?.id===task.id)void bridge.invoke('audio_segment_ack',{id:task.id,generation:task.generation,index,event});
+    });
   };
   const startBase=async(transition:BaseTransition)=>{
     baseAckPending=true;

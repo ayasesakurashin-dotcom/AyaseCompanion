@@ -8,7 +8,8 @@ interface Playback {
   source: AudioBufferSourceNode | null;
   timer: ReturnType<typeof setTimeout>;
   done: (failed: boolean) => void;
-  started?: () => void;
+  segment?: (index:number,event:'started'|'completed'|'failed') => void;
+  failed: boolean;
 }
 
 /** Companion voice clips use Web Audio without registering a media session.
@@ -23,42 +24,67 @@ export class TaskAudioPlayer {
   }) { this.backend = backend; }
 
   play(url: string, deadlineMs: number, done: (failed: boolean) => void, started?: () => void) {
+    this.playSequence([{index:0,url}],deadlineMs,done,(_index,event)=>{if(event==='started')started?.();});
+  }
+  playSequence(parts:{index:number;url:string}[],deadlineMs:number,done:(failed:boolean)=>void,segment?:Playback['segment']) {
     this.stop();
-    const playback: Playback = {
-      controller: new AbortController(), context: null, source: null,
-      timer: setTimeout(() => this.finish(playback, true), deadlineMs), done, started,
-    };
-    this.current = playback;
-    void this.prepare(playback, url);
+    const playback:Playback={controller:new AbortController(),context:null,source:null,
+      timer:setTimeout(()=>this.finish(playback,true),deadlineMs),done,segment,failed:false};
+    this.current=playback;
+    void this.prepare(playback,parts);
   }
   stop() {
     const playback = this.current;
     this.current = null;
     if (playback) this.release(playback);
   }
-  private async prepare(playback: Playback, url: string) {
+  private async prepare(playback: Playback, parts:{index:number;url:string}[]) {
     try {
-      const context = this.backend.createContext();
-      playback.context = context;
-      const [response] = await Promise.all([
-        this.backend.fetch(url, {signal: playback.controller.signal}), context.resume(),
-      ]);
-      if (this.current !== playback) return;
-      if (!response.ok) throw Error('音声读取失败');
-      const bytes = await response.arrayBuffer();
-      if (this.current !== playback) return;
-      const buffer = await context.decodeAudioData(bytes);
-      if (this.current !== playback) return;
-      const source = context.createBufferSource();
-      playback.source = source;
-      source.buffer = buffer;
-      source.connect(context.destination);
-      source.onended = () => this.finish(playback, false);
-      source.start();
-      playback.started?.();
-    } catch {
-      this.finish(playback, true);
-    }
+      const context=this.backend.createContext();playback.context=context;
+      await context.resume();
+      if(this.current!==playback)return;
+      const buffers:(AudioBuffer|null)[]=new Array(parts.length).fill(null);
+      let next=0,decodedBytes=0,duration=0;
+      const load=async()=>{
+        while(next<parts.length&&this.current===playback){
+          const slot=next++;
+          try{
+            const response=await this.backend.fetch(parts[slot].url,{signal:playback.controller.signal});
+            if(this.current!==playback)return;
+            if(!response.ok)throw Error('音声读取失败');
+            const bytes=await response.arrayBuffer();
+            if(this.current!==playback)return;
+            const buffer=await context.decodeAudioData(bytes);
+            if(this.current!==playback)return;
+            const size=buffer.length*buffer.numberOfChannels*4;
+            if(decodedBytes+size>128*1024*1024||duration+buffer.duration>600)throw Error('音声解码缓冲达到上限');
+            decodedBytes+=size;duration+=buffer.duration;buffers[slot]=buffer;
+          }catch{
+            if(this.current!==playback)return;
+            playback.failed=true;playback.segment?.(parts[slot].index,'failed');
+          }
+        }
+      };
+      // Bound fetch/decode concurrency; nothing starts until every slot has settled.
+      await Promise.all([load(),load()]);
+      if(this.current!==playback)return;
+      const start=(slot:number):void=>{
+        if(this.current!==playback)return;
+        while(slot<parts.length&&!buffers[slot])slot++;
+        if(slot>=parts.length){this.finish(playback,playback.failed);return;}
+        const source=context.createBufferSource();playback.source=source;source.buffer=buffers[slot];
+        source.connect(context.destination);
+        source.onended=()=>{
+          if(this.current!==playback)return;
+          source.onended=null;source.disconnect();playback.source=null;buffers[slot]=null;
+          playback.segment?.(parts[slot].index,'completed');
+          start(slot+1);
+        };
+        try{source.start();playback.segment?.(parts[slot].index,'started');}
+        catch{source.onended=null;source.disconnect();playback.source=null;playback.failed=true;playback.segment?.(parts[slot].index,'failed');start(slot+1);}
+      };
+      start(0);
+    } catch {this.finish(playback,true);}
   }
   private finish(playback: Playback, failed: boolean) {
     if (this.current !== playback) return;

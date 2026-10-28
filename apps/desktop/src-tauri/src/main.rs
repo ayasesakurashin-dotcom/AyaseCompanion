@@ -3,6 +3,7 @@ mod conversation;
 mod environment;
 mod host;
 mod memory;
+mod readable;
 mod services;
 #[cfg(any(test, feature = "smoke-test"))]
 mod test_http;

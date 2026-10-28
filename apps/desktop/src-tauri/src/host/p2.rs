@@ -561,7 +561,7 @@ impl Host {
                     }
                     Err(e) => {
                         self.ai.notice = format!("本段语音未播放，文字继续：{e}");
-                        json!({"failed":true})
+                        json!({"failed":true,"error":e})
                     }
                     _ => {
                         self.ai.notice = "音声缓存达到上限，文字继续".into();
@@ -589,14 +589,11 @@ impl Host {
         if let Some(t) = self.scheduler.tasks.iter().find(|t| t.id == id).cloned() {
             if t.status == Status::Preparing {
                 let text = t.plan["text"].as_str().unwrap_or("");
-                let enough = text.chars().count() >= 20
-                    || text.contains(['。', '！', '？', '\n'])
-                    || t.plan["streamDone"] == true;
+                let complete = t.plan["streamDone"] == true;
                 let audio_ready = t.plan["audioEnabled"] != true
                     || t.plan["presentationPolicy"] != "speech-synchronized"
-                    || !t.plan["audioSegments"][0].is_null()
                     || t.plan["audioDone"] == true;
-                if !text.trim().is_empty() && enough && audio_ready {
+                if !text.trim().is_empty() && complete && audio_ready {
                     let mut channels = vec!["text".into()];
                     if t.plan["audioEnabled"] == true {
                         channels.push("audio".into());
@@ -621,7 +618,8 @@ impl Host {
         let Some((epoch, old, through, input)) = self.ai.memory.summary_input(&id)? else {
             return Err("尚未积累足够的历史，无需摘要".into());
         };
-        let settings = self.ai.settings.clone();
+        let mut settings = self.ai.settings.clone();
+        settings.max_chars = 800;
         let key = self.ai.vault.key("chat", &settings.chat.endpoint)?;
         let (tx, rx) = mpsc::channel();
         self.ai.summary = Some(rx);

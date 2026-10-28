@@ -15,7 +15,7 @@ function fixture() {
   const backend:AudioBackend={
     fetch:async(_url,options)=>{signal=options.signal;return response;},
     createContext:()=>({
-      destination:{},resume:async()=>{},decodeAudioData:async()=>({}),
+      destination:{},resume:async()=>{},decodeAudioData:async()=>({length:4000,numberOfChannels:1,duration:.5}),
       close:async()=>{closed++;},
       createBufferSource:()=>{
         const source={started:false,stopped:false,disconnected:false,onended:null as (()=>void)|null,buffer:null,
@@ -73,4 +73,32 @@ test('卡住的加载有界失败，超时后到达的资源不出声',async()=>
   player.play('stalled',5,v=>events.push(v));await new Promise(r=>setTimeout(r,25));
   assert.deepEqual(events,[true]);load.resolve(f.response);await flush();
   assert.equal(f.sources.length,0);assert.equal(f.closed,1);assert.deepEqual(events,[true]);
+});
+
+test('整条音声预先解码，后段就绪前不出声，片段切换复用同一音频上下文',async()=>{
+  const f=fixture(),last=deferred<typeof f.response>(),events:string[]=[];
+  f.backend.fetch=async(url)=>url==='last'?last.promise:f.response;
+  const player=new TaskAudioPlayer(f.backend);
+  player.playSequence([{index:0,url:'first'},{index:1,url:'last'}],1000,v=>events.push(`done:${v}`),(i,e)=>events.push(`${i}:${e}`));
+  await flush();assert.equal(f.sources.length,0);assert.deepEqual(events,[]);
+  last.resolve(f.response);await flush();assert.equal(f.sources.length,1);assert.equal(f.closed,0);
+  f.sources[0].onended!();assert.equal(f.sources.length,2);assert.equal(f.sources[1].started,true);assert.equal(f.closed,0);
+  f.sources[1].onended!();assert.equal(f.closed,1);
+  assert.deepEqual(events,['0:started','0:completed','1:started','1:completed','done:false']);
+});
+
+test('一段解码失败时其他片段顺序播放，整体明确报告降级',async()=>{
+  const f=fixture(),events:string[]=[];
+  f.backend.fetch=async(url)=>({ok:url!=='bad',arrayBuffer:async()=>new ArrayBuffer(8)});
+  const player=new TaskAudioPlayer(f.backend);
+  player.playSequence([{index:0,url:'bad'},{index:1,url:'good'}],1000,v=>events.push(`done:${v}`),(i,e)=>events.push(`${i}:${e}`));
+  await flush();assert.equal(f.sources.length,1);f.sources[0].onended!();
+  assert.deepEqual(events,['0:failed','1:started','1:completed','done:true']);
+});
+
+test('停止已预缓冲的序列，迟到 ended 不能接着播放下一段',async()=>{
+  const f=fixture(),events:string[]=[];const player=new TaskAudioPlayer(f.backend);
+  player.playSequence([{index:0,url:'first'},{index:1,url:'next'}],1000,v=>events.push(`done:${v}`),(i,e)=>events.push(`${i}:${e}`));
+  await flush();const late=f.sources[0].onended!;player.stop();late();await flush();
+  assert.equal(f.sources.length,1);assert.deepEqual(events,['0:started']);assert.equal(f.closed,1);
 });

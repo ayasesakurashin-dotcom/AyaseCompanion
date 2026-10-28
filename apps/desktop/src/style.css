@@ -135,6 +135,7 @@ fieldset{border:1px solid var(--line);border-radius:8px;margin:0;padding:10px 14
 .voice-record input{font-family:Consolas,monospace;font-size:12px}
 .voice-record .form-actions{padding-top:0;border:0}
 .ai-settings [data-history] article{margin:16px 0 0;padding:16px}
+.ai-settings [data-history] p{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.8}
 @media(max-width:760px){.control-shell{padding:22px 20px}.ai-settings .settings-card{padding:18px}.form-grid,.voice-samples,.asset-check-list{grid-template-columns:minmax(0,1fr)}.panel-intro{flex-wrap:wrap}.owner-badge{max-width:100%}.control-shell header{flex-wrap:wrap}.version{margin-left:0}}
 .array-item{border-left:3px solid #dcbcd5;padding:0 0 12px 12px;margin-bottom:14px}
 .array-item>.field{margin-top:0}

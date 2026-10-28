@@ -88,7 +88,7 @@ impl Settings {
             return Err("聊天服务需要模型名称".into());
         }
         if !["fish", "openai"].contains(&self.voice_kind.as_str())
-            || !(200..=4000).contains(&self.max_chars)
+            || !(1..=4000).contains(&self.max_chars)
             || !(15..=120).contains(&self.timeout_seconds)
         {
             return Err("服务选项或输出限额无效".into());
@@ -296,6 +296,10 @@ pub fn request(
 }
 fn checked(r: Result<Response, reqwest::Error>) -> Result<Response, String> {
     let r = r.map_err(|e| {
+        #[cfg(feature = "smoke-test")]
+        if e.url().is_some_and(|u| u.host_str() == Some("127.0.0.1")) {
+            eprintln!("isolated loopback transport: {e:?}");
+        }
         if e.is_timeout() {
             "服务请求超时"
         } else {
@@ -370,7 +374,7 @@ pub fn chat(
         return Err("聊天服务尚未启用".into());
     }
     let c = client(s.timeout_seconds)?;
-    let response=checked(request(&c,&s.chat,key,"chat/completions")?.json(&json!({"model":s.chat.model,"messages":messages,"stream":true,"max_tokens":s.max_chars*2})).send())?;
+    let response=checked(request(&c,&s.chat,key,"chat/completions")?.json(&json!({"model":s.chat.model,"messages":messages,"stream":true,"max_tokens":(s.max_chars*2).max(64)})).send())?;
     let is_json = response
         .headers()
         .get("content-type")

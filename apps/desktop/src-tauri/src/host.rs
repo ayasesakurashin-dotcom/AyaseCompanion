@@ -1241,7 +1241,7 @@ fn export_diagnostics(
 ) -> Result<(), String> {
     control(&window)?;
     let h = state.lock().unwrap();
-    let d = json!({"version":"0.1.0","package":h.package.as_ref().map(|p|&p.report),"log":h.scheduler.log,"facts":*h.facts.lock().unwrap(),"capturedAt":Utc::now().to_rfc3339()});
+    let d = json!({"version":env!("CARGO_PKG_VERSION"),"package":h.package.as_ref().map(|p|&p.report),"log":h.scheduler.log,"facts":*h.facts.lock().unwrap(),"capturedAt":Utc::now().to_rfc3339()});
     let mut file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)

@@ -72,7 +72,7 @@ pub(super) fn start(app: tauri::AppHandle, state: Shared) {
                     false,
                     120000,
                     0,
-                    Some("[long]".into()),
+                    Some("[long] [pause] [markdown]".into()),
                 )?
             };
             let mut text_before_audio = false;
@@ -158,6 +158,30 @@ pub(super) fn start(app: tauri::AppHandle, state: Shared) {
             if !text_before_audio {
                 return Err("文字优先未在音声就绪前开始".into());
             }
+            {
+                let h = state.lock().unwrap();
+                let first = h.scheduler.tasks.iter().find(|t| t.id == first).unwrap();
+                let text = first.plan["text"].as_str().unwrap_or("");
+                if first.plan["streamDone"] != true
+                    || text.contains("**")
+                    || text.starts_with('#')
+                    || !text.contains("2. 第二项内容。")
+                {
+                    return Err("正文未完整可读化".into());
+                }
+                let acks = first.plan["audioAcks"].as_array().unwrap();
+                let gaps = acks
+                    .windows(2)
+                    .filter_map(|a| {
+                        Some(
+                            a[1]["startedAt"]
+                                .as_u64()?
+                                .saturating_sub(a[0]["endedAt"].as_u64()?),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                evidence.push(json!({"case":"paused Markdown source fully buffered before local reveal; single-context audio","passed":true,"audioGapsMs":gaps,"fullTextBeforePresentation":true}));
+            }
             let second = {
                 let mut h = state.lock().unwrap();
                 h.instance_mut()
@@ -184,12 +208,17 @@ pub(super) fn start(app: tauri::AppHandle, state: Shared) {
                 if h.scheduler.active().unwrap().plan["audioSegments"][0]["path"].is_null() {
                     return Err("同步策略未等待首段音声".into());
                 }
+                if h.scheduler.active().unwrap().plan["audioDone"] != true {
+                    return Err("同步策略未等待全部音声准备完成".into());
+                }
             }
             wait(&state, 35, |h| task_done(h, second))?;
             {
                 let h = state.lock().unwrap();
                 let task = h.scheduler.tasks.iter().find(|t| t.id == second).unwrap();
-                if task.status != Status::Completed {
+                if task.status != Status::Completed
+                    || task.channels.get("audio").is_none_or(|s| s != "completed")
+                {
                     return Err("同步回复未正常结束".into());
                 }
                 evidence.push(json!({"case":"speech-synchronized actual callbacks","passed":true,"channels":task.channels}));
@@ -320,7 +349,8 @@ pub(super) fn start(app: tauri::AppHandle, state: Shared) {
             Ok(())
         })();
         let h = state.lock().unwrap();
-        let report = json!({"result":if result.is_ok(){"passed"}else{"failed"},"error":result.as_ref().err(),"serviceNotice":h.ai.notice,"fixtureEndpoint":server.endpoint,"cases":evidence,"log":h.scheduler.log,"tasks":h.scheduler.tasks,"serviceMode":"synthetic local HTTP fixture; real WebView2, Canvas and Web Audio","requests":server.requests.lock().unwrap().len()});
+        let requests = server.requests.lock().unwrap();
+        let report = json!({"result":if result.is_ok(){"passed"}else{"failed"},"error":result.as_ref().err(),"serviceNotice":h.ai.notice,"fixtureEndpoint":server.endpoint,"cases":evidence,"log":h.scheduler.log,"tasks":h.scheduler.tasks,"serviceMode":"synthetic local HTTP fixture; real WebView2, Canvas and Web Audio","requests":requests.len(),"syntheticRequestPaths":requests.iter().map(|r|&r["path"]).collect::<Vec<_>>()});
         let _ = fs::write(
             h.root.join("p2-native-smoke.json"),
             serde_json::to_vec_pretty(&report).unwrap(),

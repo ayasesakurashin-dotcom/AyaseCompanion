@@ -70,6 +70,7 @@ fn text_first_starts_before_audio_and_never_exposes_reasoning() {
     let t = h.scheduler.active().unwrap();
     assert!(t.plan["audioSegments"][0].is_null());
     assert!(!t.plan["text"].as_str().unwrap().contains("hidden"));
+    assert_eq!(t.plan["streamDone"], true);
     wait(&mut h, |h| h.ai.jobs.get(&id).is_some_and(|j| j.finished));
     let requests = server.requests.lock().unwrap();
     for r in requests.iter() {
@@ -89,7 +90,7 @@ fn text_first_starts_before_audio_and_never_exposes_reasoning() {
     finish(&mut h);
 }
 #[test]
-fn synchronized_waits_for_first_segment_even_if_later_audio_arrives_first() {
+fn synchronized_waits_for_every_segment_even_if_later_audio_arrives_first() {
     let (_root, _server, mut h) = fixture();
     h.instance_mut()
         .unwrap()
@@ -109,6 +110,7 @@ fn synchronized_waits_for_first_segment_even_if_later_audio_arrives_first() {
     });
     assert!(out_of_order);
     assert!(!h.scheduler.active().unwrap().plan["audioSegments"][0].is_null());
+    assert_eq!(h.scheduler.active().unwrap().plan["audioDone"], true);
     finish(&mut h);
 }
 #[test]
@@ -336,4 +338,89 @@ fn materialized_export_preserves_unknown_identity_and_asset_bytes_without_local_
         assert!(!text.contains(forbidden));
     }
     finish(&mut h);
+}
+
+#[test]
+fn upstream_pauses_do_not_publish_a_partial_page_or_start_tts() {
+    let (_root, server, mut h) = fixture();
+    let id = submit(&mut h, "[pause] [markdown]");
+    h.tick();
+    std::thread::sleep(Duration::from_millis(350));
+    h.tick();
+    let task = h.scheduler.tasks.iter().find(|t| t.id == id).unwrap();
+    assert_eq!(task.status, Status::Preparing);
+    assert_eq!(task.plan["text"], "");
+    assert!(server
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|r| !r["path"].as_str().unwrap().contains("tts")));
+    wait(&mut h, |h| h.scheduler.active().is_some_and(|t| t.id == id));
+    let text = h.scheduler.active().unwrap().plan["text"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(text.starts_with("合成测试摘要\n\n第一句是正常正文"));
+    assert!(text.ends_with("2. 第二项内容。"));
+    assert!(!text.contains("**"));
+    wait(&mut h, |h| h.ai.jobs.get(&id).is_some_and(|j| j.finished));
+    assert_eq!(h.scheduler.active().unwrap().plan["text"], text);
+    let spoken = h.scheduler.active().unwrap().plan["audioSegments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|p| p["spokenText"].as_str())
+        .collect::<String>();
+    assert_eq!(spoken, text);
+    finish(&mut h);
+}
+#[test]
+fn synchronized_does_not_start_when_only_the_first_segment_is_ready() {
+    let (_root, _server, mut h) = fixture();
+    h.instance_mut()
+        .unwrap()
+        .profile
+        .as_mut()
+        .unwrap()
+        .presentation_policy = "speech-synchronized".into();
+    let id = submit(&mut h, "[tail-slow]");
+    let mut saw_first = false;
+    wait(&mut h, |h| {
+        let t = h.scheduler.tasks.iter().find(|t| t.id == id).unwrap();
+        if !t.plan["audioSegments"][0].is_null() && t.plan["audioDone"] != true {
+            saw_first = true;
+            assert_eq!(t.status, Status::Preparing);
+        }
+        t.status == Status::Starting
+    });
+    assert!(saw_first);
+    assert_eq!(h.scheduler.active().unwrap().plan["audioDone"], true);
+    finish(&mut h);
+}
+#[test]
+fn short_reply_limits_accept_one_and_keep_the_output_bounded() {
+    for cap in [1, 20, 80] {
+        let (_root, _server, mut h) = fixture();
+        h.ai.settings.max_chars = cap;
+        h.ai.settings.validate().unwrap();
+        h.instance_mut()
+            .unwrap()
+            .profile
+            .as_mut()
+            .unwrap()
+            .voice_enabled = false;
+        let id = submit(&mut h, "short");
+        wait(&mut h, |h| h.scheduler.active().is_some_and(|t| t.id == id));
+        let n = h.scheduler.active().unwrap().plan["text"]
+            .as_str()
+            .unwrap()
+            .chars()
+            .count();
+        assert!(n > 0 && n <= cap);
+        finish(&mut h);
+    }
+    let mut s = services::Settings::default();
+    s.max_chars = 0;
+    assert!(s.validate().is_err());
 }

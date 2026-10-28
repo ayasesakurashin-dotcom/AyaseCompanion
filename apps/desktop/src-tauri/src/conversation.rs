@@ -151,6 +151,38 @@ pub fn launch(
             vec![json!({"role":"system","content":spec.profile.prompt(s.max_chars)})];
         messages.extend(context);
         messages.push(json!({"role":"user","content":spec.input}));
+        let _ = send(
+            &tx,
+            Event::Notice("正在生成完整回复，完成后平滑呈现".into()),
+            &cancel,
+        );
+        // Network chunk boundaries must never decide a visible page or speech segment.
+        let mut raw = String::new();
+        let result = services::chat(&s, &chat_key, messages, &cancel, |text| {
+            if cancel.load(Ordering::Relaxed) {
+                return Err("请求已取消".into());
+            }
+            raw.push_str(&text);
+            Ok(())
+        });
+        let text: String = crate::readable::plain(&raw)
+            .chars()
+            .take(s.max_chars)
+            .collect();
+        if send(&tx, Event::Text(text.clone()), &cancel).is_err() {
+            return;
+        }
+        let succeeded = result.is_ok() && !text.trim().is_empty();
+        if send(&tx, Event::StreamEnd(result), &cancel).is_err() {
+            return;
+        }
+        if voice && succeeded {
+            let _ = send(
+                &tx,
+                Event::Notice("正文已就绪，正在准备整条音声".into()),
+                &cancel,
+            );
+        }
         let (audio_tx, audio_rx) = mpsc::sync_channel::<(usize, String)>(400);
         let audio_rx = Arc::new(Mutex::new(audio_rx));
         let mut handles = vec![];
@@ -199,27 +231,22 @@ pub fn launch(
                 }));
             }
         }
-        let mut pending = String::new();
+        let mut pending = text;
         let mut segments = 0usize;
-        let result = services::chat(&s, &chat_key, messages, &cancel, |text| {
-            send(&tx, Event::Text(text.clone()), &cancel)?;
-            if voice {
-                pending.push_str(&text);
-                while let Some((part, rest)) = sentence(&pending, false) {
-                    audio_tx
-                        .send((segments, part))
-                        .map_err(|_| "语音队列已关闭")?;
-                    segments += 1;
-                    pending = rest;
+        if voice {
+            while let Some((part, rest)) = sentence(&pending, true) {
+                if cancel.load(Ordering::Relaxed) {
+                    break;
                 }
+                if !part.trim().is_empty() {
+                    if audio_tx.send((segments, part)).is_err() {
+                        break;
+                    }
+                    segments += 1;
+                }
+                pending = rest;
             }
-            Ok(())
-        });
-        if voice && !pending.trim().is_empty() && !cancel.load(Ordering::Relaxed) {
-            let _ = audio_tx.send((segments, pending));
-            segments += 1;
         }
-        let _ = send(&tx, Event::StreamEnd(result), &cancel);
         drop(audio_tx);
         for h in handles {
             let _ = h.join();

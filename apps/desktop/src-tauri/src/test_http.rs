@@ -51,7 +51,13 @@ impl Drop for Server {
 }
 fn response(stream: &mut TcpStream, status: &str, kind: &str, data: &[u8]) -> std::io::Result<()> {
     write!(stream,"HTTP/1.1 {status}\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",data.len())?;
-    stream.write_all(data)
+    stream.write_all(data)?;
+    stream.flush()?;
+    // Half-close after the complete body; let the peer consume it before dropping
+    // the socket. Immediate close can abort a loopback response on Windows.
+    stream.shutdown(std::net::Shutdown::Write)?;
+    let _ = stream.read(&mut [0u8; 1]);
+    Ok(())
 }
 fn respond(mut stream: TcpStream, requests: Arc<Mutex<Vec<Value>>>) -> std::io::Result<()> {
     stream.set_read_timeout(Some(Duration::from_secs(3)))?;
@@ -162,7 +168,14 @@ fn respond(mut stream: TcpStream, requests: Arc<Mutex<Vec<Value>>>) -> std::io::
             );
         }
         let long = input.contains("[long]");
-        let chunks = if long {
+        let chunks = if input.contains("[markdown]") {
+            vec!["# 合成测试摘要\n\n第一句是**正常正文**，含 emoji 🙂。\n\n1. 第一项内容。\n2. 第二项内容。"]
+        } else if input.contains("[tail-slow]") {
+            vec![
+                "前段正常内容用于验证完整预缓冲。",
+                "末段延迟的音声应该在准备完成后连续播放。",
+            ]
+        } else if long {
             vec![
                 "第一句是流式输出中的正常正文，不应该包含内部思考。",
                 "第二句用于检查语音片段乱序返回时，仍然按照原文顺序播放。",
@@ -191,7 +204,10 @@ fn respond(mut stream: TcpStream, requests: Arc<Mutex<Vec<Value>>>) -> std::io::
             stream,
             "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n"
         )?;
-        for line in data.split_inclusive("\n\n") {
+        for (index, line) in data.split_inclusive("\n\n").enumerate() {
+            if input.contains("[pause]") && index == 4 {
+                thread::sleep(Duration::from_millis(650));
+            }
             stream.write_all(line.as_bytes())?;
             stream.flush()?;
             thread::sleep(Duration::from_millis(35));
@@ -199,11 +215,13 @@ fn respond(mut stream: TcpStream, requests: Arc<Mutex<Vec<Value>>>) -> std::io::
         Ok(())
     } else if header.lines().next().unwrap_or("").contains("tts") {
         let text = body["text"].as_str().unwrap_or("");
-        thread::sleep(Duration::from_millis(if text.contains("第一句") {
-            700
-        } else {
-            50
-        }));
+        thread::sleep(Duration::from_millis(
+            if text.contains("第一句") || text.contains("末段延迟") {
+                700
+            } else {
+                50
+            },
+        ));
         let samples = 8000usize;
         let mut wav = Vec::new();
         wav.extend(b"RIFF");

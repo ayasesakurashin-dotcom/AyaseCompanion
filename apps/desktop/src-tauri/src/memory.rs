@@ -62,6 +62,22 @@ impl Memory {
             )
             .map_err(|_| "同步结构升级失败")?;
         }
+        let has_format = db
+            .prepare("PRAGMA table_info(messages)")
+            .map_err(|_| "历史结构不可读")?
+            .query_map([], |r| r.get::<_, String>(1))
+            .map_err(|_| "历史结构不可读")?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| "历史结构不可读")?
+            .iter()
+            .any(|n| n == "display_format");
+        if !has_format {
+            db.execute(
+                "ALTER TABLE messages ADD COLUMN display_format TEXT NOT NULL DEFAULT 'legacy'",
+                [],
+            )
+            .map_err(|_| "历史显示结构升级失败")?;
+        }
         Ok(db)
     }
     pub fn bind_endpoint(&self, id: &str, endpoint: &str) -> Result<(), String> {
@@ -145,7 +161,7 @@ impl Memory {
         if text.is_empty() {
             return Ok(false);
         }
-        let rows=db.execute("INSERT INTO messages(epoch,turn,role,content,status,source) SELECT ?1,?2,'assistant',?3,?4,?5 WHERE (SELECT epoch FROM meta WHERE id=1)=?1 ON CONFLICT(epoch,turn,role) DO UPDATE SET content=excluded.content,status=excluded.status WHERE length(excluded.content)>=length(messages.content)",params![epoch,turn,text,status,source]).map_err(|_|"呈现记账失败")?;
+        let rows=db.execute("INSERT INTO messages(epoch,turn,role,content,status,source,display_format) SELECT ?1,?2,'assistant',?3,?4,?5,'plain' WHERE (SELECT epoch FROM meta WHERE id=1)=?1 ON CONFLICT(epoch,turn,role) DO UPDATE SET content=excluded.content,status=excluded.status,display_format='plain' WHERE length(excluded.content)>=length(messages.content)",params![epoch,turn,text,status,source]).map_err(|_|"呈现记账失败")?;
         Ok(rows > 0)
     }
     pub fn history(&self, id: &str) -> Result<Value, String> {
@@ -157,8 +173,12 @@ impl Memory {
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .map_err(|_| "历史不可读")?;
-        let mut stmt=db.prepare("SELECT id,role,content,status,source,created FROM (SELECT * FROM messages WHERE epoch=?1 ORDER BY id DESC LIMIT 60) ORDER BY id").map_err(|_|"历史查询失败")?;
-        let messages=stmt.query_map([epoch],|r|Ok(json!({"id":r.get::<_,u64>(0)?,"role":r.get::<_,String>(1)?,"content":r.get::<_,String>(2)?,"status":r.get::<_,String>(3)?,"source":r.get::<_,String>(4)?,"created":r.get::<_,String>(5)?}))).map_err(|_|"历史查询失败")?.collect::<Result<Vec<_>,_>>().map_err(|_|"历史读取失败")?;
+        let mut stmt=db.prepare("SELECT id,role,content,status,source,created,display_format FROM (SELECT * FROM messages WHERE epoch=?1 ORDER BY id DESC LIMIT 60) ORDER BY id").map_err(|_|"历史查询失败")?;
+        let messages=stmt.query_map([epoch],|r|{
+            let role:String=r.get(1)?;let content:String=r.get(2)?;let format:String=r.get(6)?;
+            let display=if role=="assistant"&&format=="legacy" {crate::readable::plain(&content)}else{content.clone()};
+            Ok(json!({"id":r.get::<_,u64>(0)?,"role":role,"content":content,"displayContent":display,"status":r.get::<_,String>(3)?,"source":r.get::<_,String>(4)?,"created":r.get::<_,String>(5)?}))
+        }).map_err(|_|"历史查询失败")?.collect::<Result<Vec<_>,_>>().map_err(|_|"历史读取失败")?;
         let pending: u64 = db
             .query_row("SELECT count(*) FROM outbox", [], |r| r.get(0))
             .unwrap_or(0);
@@ -291,6 +311,25 @@ impl Memory {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn history_formats_legacy_assistant_only_without_mutating_stored_content() {
+        let (root, m, a, _) = setup();
+        m.user(&a, 0, "legacy", "# 用户原文\n**原样保留**", false)
+            .unwrap();
+        let db = m.db(&a).unwrap();
+        db.execute("INSERT INTO messages(epoch,turn,role,content,status,source) VALUES(0,'legacy','assistant','# 标题\n\n**结论**','completed','chat')",[]).unwrap();
+        m.presented(&a, 0, "new", "x*y*z\n  code", "completed", "chat")
+            .unwrap();
+        let h = m.history(&a).unwrap();
+        let rows = h["messages"].as_array().unwrap();
+        assert_eq!(rows[0]["displayContent"], "# 用户原文\n**原样保留**");
+        assert_eq!(rows[1]["content"], "# 标题\n\n**结论**");
+        assert_eq!(rows[1]["displayContent"], "标题\n\n结论");
+        assert_eq!(rows[2]["displayContent"], "x*y*z\n  code");
+        drop(db);
+        drop(m);
+        let _ = fs::remove_dir_all(root);
+    }
     fn setup() -> (PathBuf, Memory, String, String) {
         let root = std::env::temp_dir().join(format!("ayase-memory-{}", Uuid::new_v4()));
         let m = Memory::open(&root).unwrap();
