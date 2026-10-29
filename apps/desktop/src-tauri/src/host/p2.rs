@@ -11,10 +11,10 @@ use std::{
 pub(super) mod tools;
 
 pub(super) struct Ai {
-    vault: services::Vault,
-    settings: services::Settings,
+    pub(super) vault: services::Vault,
+    pub(super) settings: services::Settings,
     pub(super) memory: memory::Memory,
-    pending: VecDeque<conversation::Spec>,
+    pub(super) pending: VecDeque<conversation::Spec>,
     jobs: BTreeMap<u64, conversation::Job>,
     sync: Option<Receiver<(memory::SyncItem, bool)>>,
     summary: Option<Receiver<(String, u64, u64, u64, Result<String, String>)>>,
@@ -23,7 +23,7 @@ pub(super) struct Ai {
     history_updated: u64,
     history_owner: String,
     history_cache: Value,
-    public_services: Value,
+    pub(super) public_services: Value,
     pub notice: String,
     tools: tools::Tools,
 }
@@ -172,6 +172,7 @@ impl Host {
             }
         }
         self.ai.pending.push_back(conversation::Spec {
+            context: crate::p3::Context::default(),
             id,
             generation,
             instance: instance.clone(),
@@ -222,6 +223,26 @@ impl Host {
         {
             return true;
         }
+        let stale_screen = self
+            .scheduler
+            .tasks
+            .iter()
+            .find(|t| t.id == id)
+            .and_then(|t| t.plan["evidence"]["observation"]["observedAt"].as_str())
+            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+            .is_some_and(|t| {
+                (Utc::now() - t.with_timezone(&Utc)).num_seconds()
+                    > self.ai.settings.p3.observation_ttl_seconds as i64
+            });
+        if stale_screen {
+            self.scheduler.finish(
+                id,
+                Status::Expired,
+                "新画面已超过观察有效期，请重新提问",
+                self.now(),
+            );
+            return false;
+        }
         let valid = self.instance().is_some_and(|i| {
             i.id == job.spec.instance && i.profile_revision == job.spec.profile_revision
         }) && self.ai.memory.epoch(&job.spec.instance).ok() == Some(job.spec.epoch);
@@ -231,6 +252,31 @@ impl Host {
                 .finish(id, Status::Cancelled, "开始授权关联快照已失效", now);
         }
         valid
+    }
+    pub(super) fn revoke_observation(&mut self, observation: &str) {
+        let ids = self
+            .ai
+            .pending
+            .iter()
+            .filter(|s| s.context.facts["historicalObservation"]["id"] == observation)
+            .map(|s| s.id)
+            .chain(
+                self.ai
+                    .jobs
+                    .iter()
+                    .filter(|(_, j)| {
+                        j.spec.context.facts["historicalObservation"]["id"] == observation
+                    })
+                    .map(|(id, _)| *id),
+            )
+            .collect::<Vec<_>>();
+        for id in ids {
+            self.scheduler
+                .finish(id, Status::Cancelled, "用户删除了被引用的观察", self.now());
+            if let Some(job) = self.ai.jobs.get(&id) {
+                job.cancel.store(true, Ordering::Relaxed);
+            }
+        }
     }
     pub(super) fn ai_tick(&mut self) {
         tools::tick(self);
@@ -321,13 +367,14 @@ impl Host {
                     } else {
                         "partial-final"
                     };
-                    if let Err(e) = self.ai.memory.presented(
+                    if let Err(e) = self.ai.memory.presented_with_evidence(
                         &job.spec.instance,
                         job.spec.epoch,
                         &job.spec.turn,
                         &job.shown,
                         status,
                         &job.spec.source,
+                        &task.plan["evidence"],
                     ) {
                         self.ai.notice = e;
                     }
@@ -392,6 +439,16 @@ impl Host {
                                 chat_key,
                                 voice_key,
                                 memory_key,
+                                (
+                                    self.ai
+                                        .vault
+                                        .key("vision", &self.ai.settings.p3.vision.endpoint)
+                                        .unwrap_or_default(),
+                                    self.ai
+                                        .vault
+                                        .key("search", &self.ai.settings.p3.search.endpoint)
+                                        .unwrap_or_default(),
+                                ),
                                 context,
                                 cancel.clone(),
                             );
@@ -497,6 +554,28 @@ impl Host {
         let id = job.spec.id;
         let now = self.now();
         match event {
+            conversation::Event::Evidence(value) => {
+                if let Some(t) = self.scheduler.tasks.iter_mut().find(|t| t.id == id) {
+                    t.plan["evidence"] = value;
+                }
+            }
+            conversation::Event::Observation(o) => {
+                if let Err(e) =
+                    self.ai
+                        .memory
+                        .record_observation(&job.spec.instance, job.spec.epoch, &o)
+                {
+                    self.ai.notice = e;
+                }
+            }
+            conversation::Event::ObservationOnly => {
+                if let Some(t) = self.scheduler.tasks.iter_mut().find(|t| t.id == id) {
+                    t.plan["streamDone"] = json!(true);
+                    t.plan["audioDone"] = json!(true);
+                }
+                self.scheduler
+                    .finish(id, Status::Completed, "观察已保存，未请求主动回复", now);
+            }
             conversation::Event::Text(delta) => {
                 if let Some(t) = self.scheduler.tasks.iter_mut().find(|t| t.id == id) {
                     let mut text = t.plan["text"].as_str().unwrap_or("").to_owned();
@@ -583,7 +662,12 @@ impl Host {
                     t.plan["audioCount"] = json!(count);
                 }
             }
-            conversation::Event::Notice(s) => self.ai.notice = s,
+            conversation::Event::Notice(s) => {
+                if let Some(t) = self.scheduler.tasks.iter_mut().find(|t| t.id == id) {
+                    t.plan["preparationStatus"] = json!(s);
+                }
+                self.ai.notice = s;
+            }
             conversation::Event::Finished => job.finished = true,
         }
         if let Some(t) = self.scheduler.tasks.iter().find(|t| t.id == id).cloned() {
@@ -693,6 +777,9 @@ pub(super) fn chat_request(
     if !h.ai.settings.chat.enabled {
         return Err("请先在服务设置中启用并配置聊天服务；离线验证可切换输入方式".into());
     }
+    if !h.ai.settings.p3.chat_enabled {
+        return Err("聊天入口已关闭，可在能力设置中开启".into());
+    }
     if h.profile().send_policy == "interrupt-current" {
         let now = h.now();
         h.scheduler.stop(now);
@@ -741,13 +828,21 @@ pub(super) fn text_progress(
     }
     job.shown = text.clone();
     let spec = job.spec.clone();
-    h.ai.memory.presented(
+    let evidence = h
+        .scheduler
+        .tasks
+        .iter()
+        .find(|t| t.id == id)
+        .map(|t| t.plan["evidence"].clone())
+        .unwrap_or(Value::Null);
+    h.ai.memory.presented_with_evidence(
         &spec.instance,
         spec.epoch,
         &spec.turn,
         &text,
         "partial",
         &spec.source,
+        &evidence,
     )
 }
 #[tauri::command]

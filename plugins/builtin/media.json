@@ -20,7 +20,8 @@
     ],
     "defaults": {
       "mode": "music",
-      "suppress": false
+      "suppress": false,
+      "sources": []
     }
   },
   "schema": {
@@ -39,6 +40,15 @@
       "suppress": {
         "type": "boolean",
         "title": "抑制新主动互动"
+      },
+      "sources": {
+        "type": "array",
+        "title": "允许的媒体来源（空为全部；包含匹配）",
+        "maxItems": 20,
+        "items": {
+          "type": "string",
+          "maxLength": 160
+        }
       }
     }
   },

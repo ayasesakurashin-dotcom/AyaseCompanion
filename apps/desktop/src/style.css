@@ -176,3 +176,12 @@ fieldset{border:1px solid var(--line);border-radius:8px;margin:0;padding:10px 14
 .cards{grid-template-columns:1fr}
 .plugin-row,.list-row{align-items:flex-start;flex-direction:column}
 }
+.compact-record {padding:1rem 0;border-bottom:1px solid var(--line,#e4dce5)}
+.compact-record p {margin:.35rem 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.compact-record button {margin:.5rem .5rem 0 0}
+.field-actions {display:flex;align-items:end;gap:.5rem;padding-bottom:.25rem}
+.source-link {padding:.2rem .4rem;max-width:100%;white-space:normal;text-align:left}
+.input-options {display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin:.4rem 0}
+.input-options select {flex:1;min-width:110px;padding:.3rem .4rem;height:2.1rem}
+.input-options button {padding:.3rem .55rem;white-space:nowrap}
+.screen-attachment {font-size:.8rem;overflow-wrap:anywhere;color:var(--accent,#8f566f);margin:.3rem 0}

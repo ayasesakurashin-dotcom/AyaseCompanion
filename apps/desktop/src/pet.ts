@@ -61,12 +61,17 @@ export function setupPet(root:HTMLElement,bridge:PetBridge={invoke,assetUrl:conv
       }
     }finally{ackPending=false;}
   };
-  let drag=false;
-  canvas.addEventListener('pointerdown',e=>{if(e.button!==0)return;drag=true;void bridge.drag().finally(()=>{drag=false;});});
+  let drag=false,pointerStart:{x:number;y:number}|null=null,clickTimer=0,clickOwner='';let hitAreas:{id:string;x:number;y:number;width:number;height:number}[]=[];let logical={width:1,height:1};
+  canvas.addEventListener('pointerdown',e=>{if(e.button!==0)return;pointerStart={x:e.clientX,y:e.clientY};});
+  canvas.addEventListener('pointermove',e=>{if(!pointerStart||drag)return;if(Math.hypot(e.clientX-pointerStart.x,e.clientY-pointerStart.y)>6){pointerStart=null;drag=true;clearTimeout(clickTimer);void bridge.drag().finally(()=>{drag=false;});}});
+  canvas.addEventListener('pointerup',e=>{if(!pointerStart||drag)return;pointerStart=null;const box=canvas.getBoundingClientRect(),x=(e.clientX-box.x)/box.width*logical.width,y=(e.clientY-box.y)/box.height*logical.height,bounds=renderer.referenceBounds();if(x<bounds.x||y<bounds.y||x>bounds.x+bounds.width||y>bounds.y+bounds.height)return;const area=hitAreas.find(a=>x/logical.width>=a.x&&y/logical.height>=a.y&&x/logical.width<a.x+a.width&&y/logical.height<a.y+a.height)?.id??'';const owner=clickOwner;if(!owner)return;if(clickTimer){clearTimeout(clickTimer);clickTimer=0;void bridge.invoke('pointer_event',{instanceId:owner,click:'double',area});}else clickTimer=window.setTimeout(()=>{clickTimer=0;if(owner===clickOwner)void bridge.invoke('pointer_event',{instanceId:owner,click:'single',area});},250);});
+  canvas.addEventListener('pointercancel',()=>{pointerStart=null;});
   root.querySelector('[data-input]')!.addEventListener('click',()=>void bridge.invoke('show_window',{label:'input'}));
   root.querySelector('[data-settings]')!.addEventListener('click',()=>void bridge.invoke('show_window',{label:'control'}));
   root.querySelector('[data-stop]')!.addEventListener('click',()=>void bridge.invoke('user_control',{action:'stop',value:null}));
   async function update(s:Snapshot){
+    hitAreas=s.model?.hitAreas??[];logical=s.model?.logicalSize??{width:1,height:1};
+    if(clickOwner!==(s.instance?.id??'')){clearTimeout(clickTimer);clickTimer=0;clickOwner=s.instance?.id??'';}
     const key=s.instance&&s.package?`${s.instance.id}:${s.package.hash}`:'';
     (root.querySelector('.pet-empty') as HTMLElement).hidden=!!key;
     if(!key){if(loaded){clear();renderer.dispose();loaded='';}return;}

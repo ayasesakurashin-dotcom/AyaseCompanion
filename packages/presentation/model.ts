@@ -6,6 +6,7 @@ export interface Clip {
   offset?:{x:number;y:number};
 }
 export interface Model {
+  hitAreas?:{id:string;x:number;y:number;width:number;height:number}[];
   logicalSize:{width:number;height:number};
   anchors:{feet:{x:number;y:number};bubble:{x:number;y:number}};
   clips:Record<string,Clip>;

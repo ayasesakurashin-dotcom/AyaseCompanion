@@ -11,6 +11,9 @@ pub const CAPABILITIES: &[&str] = &[
     "base.claim",
     "base.release",
     "state.set",
+    "screen.observe",
+    "weather.read",
+    "calendar.read",
 ];
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -63,6 +66,11 @@ pub fn validate_package(m: &Value, files: &BTreeMap<String, Vec<u8>>) -> Result<
 pub fn validate_plugin(p: &Plugin) -> Result<(), String> {
     schema::validate(&schema::contract("plugin"), &p.manifest)?;
     schema::validate(&schema::contract("rules"), &p.rules)?;
+    if let Some(kind) = p.manifest["hostBehavior"].as_str() {
+        if p.manifest["pluginId"] != format!("ayase.{kind}") {
+            return Err("受限内置处理器只能用于对应的内置插件".into());
+        }
+    }
     let caps = p.manifest["capabilities"].as_array().unwrap();
     let cap = |c: &str| caps.iter().any(|v| v == c);
     let mut ids = BTreeSet::new();
@@ -156,6 +164,7 @@ impl Plugin {
     }
     pub fn validate_config(&self, c: &Value) -> Result<(), String> {
         schema::validate(&self.schema, c)?;
+        crate::behavior::validate(self.manifest["hostBehavior"].as_str().unwrap_or(""), c)?;
         if let Some(tz) = c["timeZone"].as_str() {
             if tz != "system" && tz.parse::<chrono_tz::Tz>().is_err() {
                 return Err("timeZone: 未知 IANA 时区".into());
@@ -291,12 +300,26 @@ impl Plugin {
         if !c.enabled {
             return vec![];
         }
+        if self.manifest["pluginId"] == "ayase.startup-greeting" {
+            if event != c.config["source"].as_str().unwrap_or("app.ready") {
+                return vec![];
+            }
+            let (date, _, _, _) =
+                wall_parts(now, c.config["timeZone"].as_str().unwrap_or("system"));
+            let key = format!("{}:greeting", c.owner);
+            if c.config["dailyDedupe"] == true && runtime.occurrences.get(&key) == Some(&date) {
+                return vec![];
+            }
+        }
         let mut out = vec![];
         for sub in self.rules["subscriptions"].as_array().unwrap() {
             let typ = sub["type"].as_str().unwrap();
             let id = sub["id"].as_str().unwrap();
-            if (event == "clock.tick" && typ != "schedule.daily")
-                || (event != "clock.tick" && typ != event)
+            let startup =
+                self.manifest["pluginId"] == "ayase.startup-greeting" && typ == "app.ready";
+            if !startup
+                && ((event == "clock.tick" && typ != "schedule.daily")
+                    || (event != "clock.tick" && typ != event))
             {
                 continue;
             }
@@ -399,6 +422,13 @@ impl Plugin {
                 }
             }
         }
+        if self.manifest["pluginId"] == "ayase.startup-greeting" && !out.is_empty() {
+            let (date, _, _, _) =
+                wall_parts(now, c.config["timeZone"].as_str().unwrap_or("system"));
+            runtime
+                .occurrences
+                .insert(format!("{}:greeting", c.owner), date);
+        }
         out
     }
 }
@@ -430,10 +460,28 @@ pub fn choose_variant(response: &Value, unit: f64) -> Option<Value> {
     a.last().cloned()
 }
 pub fn builtin() -> BTreeMap<String, Plugin> {
-    let values: [Value; 3] = [
+    let values: Vec<Value> = vec![
         serde_json::from_str(include_str!("../../../plugins/builtin/startup.json")).unwrap(),
         serde_json::from_str(include_str!("../../../plugins/builtin/fullscreen.json")).unwrap(),
         serde_json::from_str(include_str!("../../../plugins/builtin/media.json")).unwrap(),
+        serde_json::from_str(include_str!("../../../plugins/builtin/work-reminder.json")).unwrap(),
+        serde_json::from_str(include_str!(
+            "../../../plugins/builtin/random-interaction.json"
+        ))
+        .unwrap(),
+        serde_json::from_str(include_str!(
+            "../../../plugins/builtin/pointer-interaction.json"
+        ))
+        .unwrap(),
+        serde_json::from_str(include_str!("../../../plugins/builtin/observation.json")).unwrap(),
+        serde_json::from_str(include_str!("../../../plugins/builtin/weather-care.json")).unwrap(),
+        serde_json::from_str(include_str!("../../../plugins/builtin/calendar-care.json")).unwrap(),
+        serde_json::from_str(include_str!("../../../plugins/builtin/special-date.json")).unwrap(),
+        serde_json::from_str(include_str!("../../../plugins/builtin/routine-care.json")).unwrap(),
+        serde_json::from_str(include_str!(
+            "../../../plugins/builtin/scheduled-reminder.json"
+        ))
+        .unwrap(),
     ];
     values
         .into_iter()

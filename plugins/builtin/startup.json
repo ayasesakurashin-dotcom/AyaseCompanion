@@ -37,7 +37,8 @@
             ]
           }
         }
-      ]
+      ],
+      "dailyDedupe": false
     }
   },
   "schema": {
@@ -50,7 +51,12 @@
     ],
     "properties": {
       "source": {
-        "const": "app.ready",
+        "enum": [
+          "app.ready",
+          "system.login",
+          "system.unlock",
+          "system.resume"
+        ],
         "title": "事件来源"
       },
       "timeZone": {
@@ -279,6 +285,11 @@
             }
           }
         }
+      },
+      "dailyDedupe": {
+        "type": "boolean",
+        "title": "每日只问候一次",
+        "default": false
       }
     }
   },

@@ -1,14 +1,14 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "AyaseCompanion",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "identifier": "com.ayase.companion",
   "build": { "devUrl": "http://localhost:1427", "frontendDist": "../../../dist" },
   "app": {
     "windows": [
       {"label":"pet","title":"AyaseCompanion · 桌宠","url":"index.html?view=pet","width":420,"height":520,"decorations":false,"transparent":true,"alwaysOnTop":true,"skipTaskbar":true,"resizable":false,"focus":false,"focusable":false,"shadow":false},
       {"label":"control","title":"AyaseCompanion · 控制台","url":"index.html?view=control","width":980,"height":780,"minWidth":720,"minHeight":560,"visible":true},
-      {"label":"input","title":"AyaseCompanion · 输入","url":"index.html?view=input","width":440,"height":205,"resizable":false,"alwaysOnTop":true,"visible":false}
+      {"label":"input","title":"AyaseCompanion · 输入","url":"index.html?view=input","width":440,"height":290,"resizable":false,"alwaysOnTop":true,"visible":false}
     ],
     "security": {
       "csp":"default-src 'self'; img-src 'self' asset: http://asset.localhost data:; media-src 'self' asset: http://asset.localhost blob:; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost asset: http://asset.localhost",

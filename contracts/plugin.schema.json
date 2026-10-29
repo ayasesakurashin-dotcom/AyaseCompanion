@@ -1,11 +1,102 @@
 {
-  "$schema":"https://json-schema.org/draft/2020-12/schema",
-  "type":"object","required":["format","formatVersion","pluginId","version","displayName","apiVersion","configVersion","runtime","configSchema","capabilities","defaults"],
-  "properties":{
-    "format":{"const":"ayase.plugin"},"formatVersion":{"const":"1.0"},"apiVersion":{"const":"1.0"},"configVersion":{"const":"1.0"},
-    "pluginId":{"type":"string","pattern":"^[a-zA-Z0-9][a-zA-Z0-9._-]{1,127}$"},"version":{"type":"string","pattern":"^[0-9]+\\.[0-9]+\\.[0-9]+$"},"displayName":{"type":"string","minLength":1,"maxLength":160},
-    "runtime":{"type":"object","required":["type","entry"],"properties":{"type":{"const":"declarative.v1"},"entry":{"type":"string"}}},
-    "configSchema":{"type":"string"},"uiSchema":{"type":"string"},"defaultPriority":{"enum":["normal","background","important"]},
-    "capabilities":{"type":"array","maxItems":16,"items":{"type":"string"}},"optionalCapabilities":{"type":"array","maxItems":16,"items":{"type":"string"}},"defaults":{"type":"object"}
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "format",
+    "formatVersion",
+    "pluginId",
+    "version",
+    "displayName",
+    "apiVersion",
+    "configVersion",
+    "runtime",
+    "configSchema",
+    "capabilities",
+    "defaults"
+  ],
+  "properties": {
+    "format": {
+      "const": "ayase.plugin"
+    },
+    "formatVersion": {
+      "const": "1.0"
+    },
+    "apiVersion": {
+      "const": "1.0"
+    },
+    "configVersion": {
+      "const": "1.0"
+    },
+    "pluginId": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{1,127}$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "displayName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "runtime": {
+      "type": "object",
+      "required": [
+        "type",
+        "entry"
+      ],
+      "properties": {
+        "type": {
+          "const": "declarative.v1"
+        },
+        "entry": {
+          "type": "string"
+        }
+      }
+    },
+    "configSchema": {
+      "type": "string"
+    },
+    "uiSchema": {
+      "type": "string"
+    },
+    "defaultPriority": {
+      "enum": [
+        "normal",
+        "background",
+        "important"
+      ]
+    },
+    "capabilities": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "string"
+      }
+    },
+    "optionalCapabilities": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "string"
+      }
+    },
+    "defaults": {
+      "type": "object"
+    },
+    "hostBehavior": {
+      "enum": [
+        "work-reminder",
+        "random-interaction",
+        "pointer-interaction",
+        "observation",
+        "weather-care",
+        "calendar-care",
+        "special-date",
+        "routine-care",
+        "scheduled-reminder"
+      ]
+    }
   }
 }

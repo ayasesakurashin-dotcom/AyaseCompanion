@@ -55,3 +55,13 @@ response.mode 支持 fixed、generated、generated-with-fallback。fixed 必须�
 P2 运行的文字计划使用增量累积正文和 streamDone；语音使用有序 audioSegments、audioCount、audioDone，解码和播放回执带任务 ID/代次/段序号。正常通道完成仍由原调度器聚合；断流按失败收尾并记录实际显示部分。所有异步数据均受原实例、历史 epoch 和取消令牌限制。
 
 实现与配置见 docs/adr/0002-p2-services-memory.md、docs/p2-user-guide.md。实机记录只留本机。
+
+## P3 内置行为与证据
+
+新增受限 `hostBehavior` 声明仅用于同名内置插件，不接受外部包覆盖。配置由内置 schema 与 Rust 校验器共同校验。工作、随机、点击、定时/周期、观察和关怀输出继续复用现有请求及完整任务调度。
+
+sprite 可选 `hitAreas` 为最多32个归一化矩形，字段 id/x/y/width/height；未提供或指定区域不存在时使用模型可见区域。
+
+屏幕票据仅在内存中绑定伙伴、历史 epoch、配置和窗口身份；跨窗口消息只传不透明票据，原生句柄及图像不由前端指定。观察原文、稳定序号、摘要水位和搜索来源为私有运行数据，不进入角色包。历史来源与实际呈现正文一起记账；观察删除/遗忘使相应旧摘要及引用失效。
+
+统一主动预算、各行为配置、服务边界和真实服务说明见 docs/adr/0003-p3-capabilities.md 与 docs/p3-user-guide.md。P3 候选不表示已完成人工验收。

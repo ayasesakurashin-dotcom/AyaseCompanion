@@ -347,7 +347,7 @@ pub(in crate::host) async fn refresh_voice(
     .map_err(|_| "音色状态查询未能完成".to_owned())?
 }
 
-pub(super) fn prepare_preview(
+pub(in crate::host) fn prepare_preview(
     h: &mut Host,
     owner: &str,
     timeout: u64,
@@ -379,7 +379,7 @@ pub(super) fn prepare_preview(
     h.ai.tools.previews.insert(id, directory.clone());
     Ok((id, generation, directory))
 }
-pub(super) fn complete_preview(
+pub(in crate::host) fn complete_preview(
     h: &mut Host,
     owner: &str,
     id: u64,
@@ -449,6 +449,19 @@ fn prepare_samples(
     for sample in samples {
         if !ids.insert(sample.asset_id.clone()) {
             return Err("请勿重复选择相同素材".into());
+        }
+        if sample.asset_id.starts_with("local-") {
+            let (meta, bytes) = crate::p3::samples::load(&h.root, owner, &sample.asset_id)?;
+            total += bytes.len();
+            if total > 25 * 1024 * 1024 {
+                return Err("上传音声总计超过25 MiB".into());
+            }
+            selected.push(Sample {
+                bytes,
+                extension: meta["extension"].as_str().unwrap_or("").into(),
+                transcript: sample.transcript,
+            });
+            continue;
         }
         let asset = &p.manifest["assets"][&sample.asset_id];
         if asset["kind"] != "audio" {

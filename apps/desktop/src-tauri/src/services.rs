@@ -33,6 +33,7 @@ impl Default for Provider {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
+    pub p3: crate::p3::Settings,
     pub chat: Provider,
     pub voice: Provider,
     pub memory: Provider,
@@ -43,6 +44,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            p3: crate::p3::Settings::default(),
             chat: Provider::default(),
             voice: Provider {
                 endpoint: "https://api.fish.audio/v1".into(),
@@ -73,6 +75,7 @@ pub fn endpoint(value: &str) -> Result<reqwest::Url, String> {
 }
 impl Settings {
     pub fn validate(&self) -> Result<(), String> {
+        self.p3.validate()?;
         for p in [&self.chat, &self.voice, &self.memory] {
             if !p.endpoint.is_empty() {
                 endpoint(&p.endpoint)?;
@@ -145,6 +148,8 @@ impl Vault {
             ("chat", &s.chat),
             ("voice", &s.voice),
             ("memory", &s.memory),
+            ("vision", &s.p3.vision),
+            ("search", &s.p3.search),
         ] {
             let slot = Self::slot(kind, &p.endpoint);
             if let Some(key) = keys[kind].as_str() {

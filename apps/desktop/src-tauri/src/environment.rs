@@ -3,10 +3,114 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
+static EVENTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+static LOCKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub fn locked() -> bool {
+    LOCKED.load(std::sync::atomic::Ordering::Relaxed)
+}
+pub fn drain_events() -> Vec<String> {
+    std::mem::take(&mut *EVENTS.lock().unwrap())
+}
+#[cfg(windows)]
+fn idle_seconds() -> Option<u64> {
+    #[repr(C)]
+    struct Last {
+        size: u32,
+        time: u32,
+    }
+    #[link(name = "user32")]
+    extern "system" {
+        fn GetLastInputInfo(info: *mut Last) -> i32;
+    }
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetTickCount64() -> u64;
+    }
+    if LOCKED.load(std::sync::atomic::Ordering::Relaxed) {
+        return None;
+    }
+    let mut info = Last {
+        size: std::mem::size_of::<Last>() as u32,
+        time: 0,
+    };
+    unsafe {
+        if GetLastInputInfo(&mut info) == 0 {
+            None
+        } else {
+            Some((GetTickCount64() as u32).wrapping_sub(info.time) as u64 / 1000)
+        }
+    }
+}
+#[cfg(windows)]
+fn session_events() {
+    std::thread::spawn(|| unsafe {
+        use windows::{
+            core::w,
+            Win32::{
+                Foundation::{HWND, LPARAM, LRESULT, WPARAM},
+                System::RemoteDesktop::{WTSRegisterSessionNotification, NOTIFY_FOR_THIS_SESSION},
+                UI::WindowsAndMessaging::*,
+            },
+        };
+        unsafe extern "system" fn message(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESULT {
+            let event = match (msg, w.0) {
+                (WM_WTSSESSION_CHANGE, 5) => Some("system.login"),
+                (WM_WTSSESSION_CHANGE, 7) => {
+                    LOCKED.store(true, std::sync::atomic::Ordering::Relaxed);
+                    None
+                }
+                (WM_WTSSESSION_CHANGE, 8) => {
+                    LOCKED.store(false, std::sync::atomic::Ordering::Relaxed);
+                    Some("system.unlock")
+                }
+                (WM_POWERBROADCAST, 7 | 18) => Some("system.resume"),
+                _ => None,
+            };
+            if let Some(event) = event {
+                let mut events = EVENTS.lock().unwrap();
+                if events.len() < 32 && !events.iter().any(|e| e == event) {
+                    events.push(event.into());
+                }
+            }
+            DefWindowProcW(hwnd, msg, w, l)
+        }
+        let class = WNDCLASSW {
+            lpfnWndProc: Some(message),
+            lpszClassName: w!("AyaseEnvironmentEvents"),
+            ..Default::default()
+        };
+        if RegisterClassW(&class) == 0 {
+            return;
+        }
+        if let Ok(hwnd) = CreateWindowExW(
+            WINDOW_EX_STYLE::default(),
+            w!("AyaseEnvironmentEvents"),
+            w!("AyaseEnvironmentEvents"),
+            WINDOW_STYLE::default(),
+            0,
+            0,
+            0,
+            0,
+            None,
+            None,
+            None,
+            None,
+        ) {
+            let _ = WTSRegisterSessionNotification(hwnd, NOTIFY_FOR_THIS_SESSION);
+            let mut msg = MSG::default();
+            while GetMessageW(&mut msg, None, 0, 0).0 > 0 {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+    });
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Facts {
+    #[serde(default)]
+    pub idle_seconds: Option<u64>,
     pub fullscreen: Option<bool>,
     pub media: Option<bool>,
     pub fullscreen_status: String,
@@ -18,6 +122,7 @@ pub struct Facts {
 impl Default for Facts {
     fn default() -> Self {
         Self {
+            idle_seconds: None,
             fullscreen: None,
             media: None,
             fullscreen_status: "采集初始化中".into(),
@@ -34,6 +139,8 @@ pub struct Settings {
     pub excluded: Vec<String>,
 }
 pub fn start(facts: Arc<Mutex<Facts>>, settings: Arc<Mutex<Settings>>, origin: Instant) {
+    #[cfg(windows)]
+    session_events();
     std::thread::spawn(move || {
         #[cfg(windows)]
         {
@@ -48,6 +155,7 @@ pub fn start(facts: Arc<Mutex<Facts>>, settings: Arc<Mutex<Settings>>, origin: I
             let mut manager = None;
             let mut tries = 0;
             loop {
+                crate::p3::screen::track();
                 if manager.is_none() && tries % 30 == 0 {
                     manager = Manager::RequestAsync().ok().and_then(|op| op.get().ok());
                 }
@@ -57,6 +165,7 @@ pub fn start(facts: Arc<Mutex<Facts>>, settings: Arc<Mutex<Settings>>, origin: I
                     (s.pet_hwnd, s.excluded.clone())
                 };
                 let mut f = Facts {
+                    idle_seconds: idle_seconds(),
                     sample: origin.elapsed().as_millis() as u64,
                     ..Default::default()
                 };

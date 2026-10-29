@@ -20,6 +20,7 @@ use std::{
 use tauri::{Manager, State, WebviewWindow};
 use uuid::Uuid;
 mod p2;
+mod p3;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -105,10 +106,13 @@ struct Host {
     facts: Arc<Mutex<Facts>>,
     env_settings: Arc<Mutex<environment::Settings>>,
     previous_facts: (Option<bool>, Option<bool>),
+    previous_media_sources: Vec<String>,
     last_wall: i64,
     startup_sent: bool,
     renderer_ready: bool,
     ai: p2::Ai,
+    p3: p3::P3,
+    app: Option<tauri::AppHandle>,
 }
 type Shared = Arc<Mutex<Host>>;
 fn materialize_identity_assets(manifest: &mut Value, overrides: &Value) {
@@ -146,6 +150,46 @@ impl Host {
         let stored = db.query_row("SELECT value FROM settings WHERE key='host'", [], |r| {
             r.get::<_, String>(0)
         });
+        if stored.is_ok() && !root.join("backups/before-p3.complete").exists() {
+            let backup = root.join("backups/before-p3");
+            fs::create_dir_all(&backup).map_err(|_| "P3升级前备份目录无法创建")?;
+            let mut sources = vec![root.join("host.sqlite3"), root.join("services.sqlite3")];
+            if let Ok(items) = fs::read_dir(root.join("contexts")) {
+                for item in items.flatten() {
+                    let path = item.path();
+                    if path.extension().is_some_and(|x| x == "sqlite3") {
+                        sources.push(path);
+                    }
+                }
+            }
+            for source in sources.into_iter().filter(|p| p.exists()) {
+                let parent = if source.parent() == Some(root.join("contexts").as_path()) {
+                    backup.join("contexts")
+                } else {
+                    backup.clone()
+                };
+                fs::create_dir_all(&parent).map_err(|_| "备份目录不可写")?;
+                let destination = parent.join(source.file_name().unwrap());
+                if !destination.exists() {
+                    let source_db = Connection::open(&source).map_err(|_| "升级前数据库不可读")?;
+                    source_db
+                        .execute("VACUUM INTO ?1", [destination.to_string_lossy().as_ref()])
+                        .map_err(|_| "P3升级前一致性备份失败，原数据保留")?;
+                }
+                let check = Connection::open(&destination).map_err(|_| "升级备份不可读")?;
+                let result: String = check
+                    .query_row("PRAGMA quick_check", [], |r| r.get(0))
+                    .map_err(|_| "升级备份校验失败")?;
+                if result != "ok" {
+                    return Err("P3升级备份不完整，原数据保留".into());
+                }
+            }
+            fs::write(
+                root.join("backups/before-p3.complete"),
+                "v0.2.0 databases preserved",
+            )
+            .map_err(|_| "升级备份标记不可写")?;
+        }
         // Snapshot the existing P0/P1 settings before adding P2 metadata. Packages
         // are immutable and remain in place; this uses SQLite's consistent copy.
         if stored.is_ok() {
@@ -200,10 +244,13 @@ impl Host {
             facts,
             env_settings,
             previous_facts: (None, None),
+            previous_media_sources: vec![],
             last_wall: 0,
             startup_sent: false,
             renderer_ready: false,
             ai,
+            p3: p3::P3::default(),
+            app: None,
         };
         for hash in &h.store.installed {
             if let Ok(p) = h.load_package(hash) {
@@ -226,6 +273,18 @@ impl Host {
             }
         }
         h.scheduler.muted = h.store.muted;
+        for i in &mut h.store.instances {
+            for (key, value) in &mut i.runtime.state {
+                if key.starts_with("p3:") && key != "p3:budget" {
+                    if let Some(o) = value.as_object_mut() {
+                        o.remove("accepted");
+                        o.insert("work".into(), json!(0));
+                        o.insert("scheduled".into(), json!(false));
+                        o.insert("last".into(), json!(0));
+                    }
+                }
+            }
+        }
         for i in &h.store.instances {
             if h.ai.memory.finalize_interrupted(&i.id).is_err() {
                 h.ai.notice = "部分伙伴上下文暂不可读，原数据已保留".into();
@@ -363,7 +422,29 @@ impl Host {
             .unwrap_or_default();
         for c in configs {
             if let Some(p) = self.plugins.get(&c.plugin_id) {
-                for output in p.dispatch(&c, event, active, wall, &mut runtime) {
+                let filtered_active = if event == "environment.media"
+                    && active == Some(true)
+                    && c.config["sources"]
+                        .as_array()
+                        .is_some_and(|v| !v.is_empty())
+                {
+                    let f = self.facts.lock().unwrap();
+                    Some(
+                        c.config["sources"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .any(|filter| {
+                                f.media_sources.iter().any(|source| {
+                                    source.to_lowercase().contains(&filter.to_lowercase())
+                                })
+                            }),
+                    )
+                } else {
+                    active
+                };
+                for output in p.dispatch(&c, event, filtered_active, wall, &mut runtime) {
                     outputs.push((c.clone(), output));
                 }
             }
@@ -502,6 +583,9 @@ impl Host {
             self.scheduler.revisions.insert(c.owner, c.revision);
         }
         if self.last_wall != wall.timestamp() {
+            for event in environment::drain_events() {
+                self.dispatch(&event, None, wall);
+            }
             let mut facts = self.facts.lock().unwrap().clone();
             if now.saturating_sub(facts.sample) > 5000 {
                 facts.fullscreen = None;
@@ -512,11 +596,14 @@ impl Host {
                 self.scheduler
                     .record(now, "fullscreen-fact", json!(facts.fullscreen));
             }
-            if self.previous_facts.1 != facts.media {
+            if self.previous_facts.1 != facts.media
+                || self.previous_media_sources != facts.media_sources
+            {
                 self.dispatch("environment.media", facts.media, wall);
                 self.scheduler.record(now, "media-fact", json!(facts.media));
             }
             self.previous_facts = (facts.fullscreen, facts.media);
+            self.previous_media_sources = facts.media_sources;
             let before = self.instance().map(|i| i.runtime.occurrences.clone());
             self.dispatch("clock.tick", None, wall);
             if let Some(i) = self.instance_mut() {
@@ -531,6 +618,8 @@ impl Host {
                 self.scheduler.record(now,"system-time-gap",json!({"seconds":wall.timestamp()-self.last_wall,"note":"恢复后的真实通道行为需实机记录"}));
             }
             self.last_wall = wall.timestamp();
+            let app = self.app.clone();
+            self.p3_tick(wall, None, app.as_ref());
         }
         if let Some(model) = self.package.as_ref().and_then(|p| p.model.as_ref()) {
             self.scheduler.reconcile_base(model, now);
@@ -567,7 +656,7 @@ impl Host {
                     .collect::<serde_json::Map<_, _>>()
             })
             .unwrap_or_default();
-        let plugins=self.plugins.values().map(|p|json!({"id":p.manifest["pluginId"],"name":p.manifest["displayName"],"defaults":p.manifest["defaults"],"schema":p.schema,"configVersion":p.manifest["configVersion"],"priority":p.manifest["defaultPriority"]})).collect::<Vec<_>>();
+        let plugins=self.plugins.values().map(|p|json!({"id":p.manifest["pluginId"],"name":p.manifest["displayName"],"defaults":p.manifest["defaults"],"hostBehavior":p.manifest["hostBehavior"],"schema":p.schema,"configVersion":p.manifest["configVersion"],"priority":p.manifest["defaultPriority"]})).collect::<Vec<_>>();
         let known = self.configured();
         let unknown = self
             .presets()
@@ -585,7 +674,7 @@ impl Host {
             facts.fullscreen_status = "采集超时 / 状态未知".into();
             facts.media_status = "采集超时 / 状态未知".into();
         }
-        json!({"version":"0.2.0","stage":"P2 · 已验收","ai":self.ai_snapshot(),"instance":self.instance(),"instances":self.store.instances.iter().map(|i|json!({"id":i.id,"name":i.name,"packageHash":i.package_hash})).collect::<Vec<_>>(),"library":self.store.library,
+        json!({"version":"0.3.0","stage":"P3 · 实机验收候选","p3":self.p3_snapshot(),"ai":self.ai_snapshot(),"instance":self.instance(),"instances":self.store.instances.iter().map(|i|json!({"id":i.id,"name":i.name,"packageHash":i.package_hash})).collect::<Vec<_>>(),"library":self.store.library,
             "package":self.package.as_ref().map(|p|&p.report),"manifest":self.package.as_ref().map(|p|&p.manifest),"model":self.package.as_ref().and_then(|p|p.model.as_ref()),"assetPaths":asset_paths,
             "plugins":plugins,"configured":known,"unknownPresets":unknown,"scheduler":self.scheduler.snapshot(),"facts":facts,"zoom":self.store.zoom,"bubble":self.store.bubble,"excluded":self.store.excluded,"dataDirectory":self.root.to_string_lossy()})
     }
@@ -1277,7 +1366,9 @@ pub fn run() {
             } else {
                 app.path().app_data_dir()?
             };
-            let h = Host::open(root).map_err(std::io::Error::other)?;
+            let mut h = Host::open(root).map_err(std::io::Error::other)?;
+            h.app = Some(app.handle().clone());
+            crate::p3::screen::start(app.handle());
             allow_assets(app.handle(), &h);
             resize_pet(app.handle(), h.store.zoom);
             #[cfg(windows)]
@@ -1311,7 +1402,7 @@ pub fn run() {
                 .icon(tauri::image::Image::from_bytes(include_bytes!(
                     "../icons/icon.png"
                 ))?)
-                .tooltip("AyaseCompanion 0.2.0")
+                .tooltip("AyaseCompanion 0.3.0")
                 .menu(&menu)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => {
@@ -1356,6 +1447,16 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            p3::prepare_screen,
+            p3::capability_request,
+            p3::p3_action,
+            p3::environment_lookup,
+            p3::pointer_event,
+            p3::save_capabilities,
+            p3::capability_probe,
+            p3::local_sample_action,
+            p3::open_source,
+            p3::observation_page,
             p2::tools::service_probe,
             p2::tools::preview_voice,
             p2::tools::cancel_voice_preview,

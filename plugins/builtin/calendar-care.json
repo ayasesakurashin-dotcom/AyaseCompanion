@@ -1,0 +1,310 @@
+{
+  "manifest": {
+    "format": "ayase.plugin",
+    "formatVersion": "1.0",
+    "pluginId": "ayase.calendar-care",
+    "version": "0.3.0",
+    "displayName": "日历关怀",
+    "apiVersion": "1.0",
+    "configVersion": "1.0",
+    "runtime": {
+      "type": "declarative.v1",
+      "entry": "rules/main.json"
+    },
+    "configSchema": "schemas/config.schema.json",
+    "defaultPriority": "background",
+    "capabilities": [
+      "presentation.request",
+      "calendar.read"
+    ],
+    "hostBehavior": "calendar-care",
+    "defaults": {
+      "timeZone": "system",
+      "start": "08:00",
+      "end": "23:00",
+      "cooldownSeconds": 2700,
+      "dailyLimit": 2,
+      "ttlSeconds": 180,
+      "response": {
+        "mode": "generated-with-fallback",
+        "intent": "根据已导入日历里的日期作简短问候，不编造节假日或调休。",
+        "fallback": [
+          {
+            "id": "default",
+            "text": "愿你今天也顺顺利利。"
+          }
+        ]
+      },
+      "categories": [
+        "traditional",
+        "public"
+      ]
+    }
+  },
+  "schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "timeZone",
+      "start",
+      "end",
+      "cooldownSeconds",
+      "dailyLimit",
+      "ttlSeconds",
+      "response",
+      "categories"
+    ],
+    "properties": {
+      "timeZone": {
+        "type": "string",
+        "title": "IANA 时区或 system",
+        "default": "system",
+        "maxLength": 160
+      },
+      "start": {
+        "type": "string",
+        "title": "允许时段开始",
+        "default": "08:00",
+        "maxLength": 160,
+        "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+      },
+      "end": {
+        "type": "string",
+        "title": "允许时段结束",
+        "default": "23:00",
+        "maxLength": 160,
+        "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+      },
+      "cooldownSeconds": {
+        "type": "integer",
+        "title": "此配置冷却（秒）",
+        "default": 2700,
+        "minimum": 1,
+        "maximum": 86400
+      },
+      "dailyLimit": {
+        "type": "integer",
+        "title": "此配置每日上限",
+        "default": 2,
+        "minimum": 1,
+        "maximum": 100
+      },
+      "ttlSeconds": {
+        "type": "integer",
+        "title": "排队有效期（秒）",
+        "default": 180,
+        "minimum": 1,
+        "maximum": 3600
+      },
+      "response": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": [
+          "mode"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "enum": [
+              "fixed",
+              "generated",
+              "generated-with-fallback"
+            ],
+            "title": "回复来源：fixed 固定 / generated 生成 / generated-with-fallback 生成并设后备"
+          },
+          "variants": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 64,
+            "items": {
+              "type": "object",
+              "required": [
+                "id"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "weight": {
+                  "type": "number",
+                  "minimum": 0.001,
+                  "maximum": 10000
+                },
+                "text": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "string",
+                      "maxLength": 12000
+                    }
+                  ]
+                },
+                "textAsset": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                },
+                "audioAsset": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                },
+                "cue": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                },
+                "readMs": {
+                  "type": "integer",
+                  "minimum": 1000,
+                  "maximum": 30000
+                }
+              }
+            },
+            "title": "固定回复变体"
+          },
+          "intent": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000,
+            "title": "统一人格生成的互动目的"
+          },
+          "fallback": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 64,
+            "items": {
+              "type": "object",
+              "required": [
+                "id"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "weight": {
+                  "type": "number",
+                  "minimum": 0.001,
+                  "maximum": 10000
+                },
+                "text": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "string",
+                      "maxLength": 12000
+                    }
+                  ]
+                },
+                "textAsset": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                },
+                "audioAsset": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                },
+                "cue": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                },
+                "readMs": {
+                  "type": "integer",
+                  "minimum": 1000,
+                  "maximum": 30000
+                }
+              }
+            },
+            "title": "生成失败时明确使用的固定后备"
+          },
+          "cue": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "voice": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "mode": {
+                "enum": [
+                  "off",
+                  "tts"
+                ]
+              },
+              "presentationPolicy": {
+                "enum": [
+                  "text-first",
+                  "speech-synchronized"
+                ]
+              }
+            },
+            "title": "生成回复的语音策略"
+          }
+        }
+      },
+      "categories": {
+        "type": "array",
+        "title": "参与的日期类别",
+        "default": [
+          "traditional",
+          "public"
+        ],
+        "maxItems": 4,
+        "items": {
+          "enum": [
+            "traditional",
+            "public",
+            "solar-term",
+            "workday"
+          ]
+        }
+      }
+    }
+  },
+  "rules": {
+    "schemaVersion": "1.0",
+    "subscriptions": [],
+    "rules": []
+  }
+}

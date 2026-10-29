@@ -304,7 +304,7 @@ mod tests {
         let s = settings(&server);
         for kind in ["chat", "voice", "memory"] {
             let e = probe(kind, &s, "synthetic-invalid-key").unwrap_err();
-            assert!(e.contains("401"));
+            assert!(e.contains("401"), "{kind}: {e}");
             assert!(!e.contains("synthetic"));
             assert!(!e.contains("do-not-display"));
         }

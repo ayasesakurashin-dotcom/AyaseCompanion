@@ -3,6 +3,7 @@ mod conversation;
 mod environment;
 mod host;
 mod memory;
+mod p3;
 mod readable;
 mod services;
 #[cfg(any(test, feature = "smoke-test"))]
