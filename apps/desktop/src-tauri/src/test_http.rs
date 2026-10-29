@@ -212,6 +212,10 @@ fn respond(mut stream: TcpStream, requests: Arc<Mutex<Vec<Value>>>) -> std::io::
             stream.flush()?;
             thread::sleep(Duration::from_millis(35));
         }
+        // Deliver the final SSE bytes before EOF, including deliberate missing-DONE
+        // cases. A reset on Windows may otherwise discard already-written data.
+        stream.shutdown(std::net::Shutdown::Write)?;
+        let _ = stream.read(&mut [0u8; 1]);
         Ok(())
     } else if header.lines().next().unwrap_or("").contains("tts") {
         let text = body["text"].as_str().unwrap_or("");

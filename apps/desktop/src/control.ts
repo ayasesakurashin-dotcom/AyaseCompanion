@@ -11,7 +11,7 @@ const id=()=>crypto.randomUUID();
 export function setupControl(root:HTMLElement){
   let state:Snapshot|null=null,libraryKey='',pluginsKey='',assetsKey='',nameOwner='',nameDirty=false,bubbleDirty=false;
   root.innerHTML=`<div class="control-shell">
-    <header><img class="brand-mark" src="${appIcon}" alt="AyaseCompanion"><div><h1>AyaseCompanion</h1><p>你的桌面伙伴</p></div><span class="version">0.2.0 <b>P2 · 实机验收候选</b></span></header>
+    <header><img class="brand-mark" src="${appIcon}" alt="AyaseCompanion"><div><h1>AyaseCompanion</h1><p>你的桌面伙伴</p></div><span class="version">0.2.0 <b>P2 · 已验收</b></span></header>
     <div class="notice">P2 加入统一人格、流式聊天、合成语音与独立记忆。请先配置服务；离线播放验证仍可使用。</div>
     <nav aria-label="控制台页面"><button class="selected" data-tab="home">伙伴</button><button data-tab="play">播放验证</button><button data-tab="plugins">行为插件</button><button data-tab="diagnostics">运行记录</button></nav>
     <div id="message" role="status" aria-live="polite"></div>
@@ -22,7 +22,7 @@ export function setupControl(root:HTMLElement){
       <div class="settings-row"><label>切换已创建的伙伴 <select id="instances"></select></label><button data-action="select-instance">切换</button></div>
       <div class="settings-row"><label>当前伙伴名称 <input id="instance-name" maxlength="80" placeholder="为这位伙伴取个名字"></label><button data-action="rename">保存名称</button></div>
       <details class="bubble-settings"><summary>气泡外观与阅读</summary><p>气泡跟随角色大小，字体单独调整；读完自动收起。设置保存在本机，后续纳入气泡主题。</p><div class="grid-two"><label>文字动画<select id="bubble-animation"><option value="typewriter">打字机</option><option value="none">立即显示</option></select></label><label>显现速度（字 / 秒）<input id="bubble-speed" type="number" min="10" max="80" value="30"></label><label>字号（像素）<input id="bubble-font" type="number" min="12" max="24" value="15"></label><label>每页最少阅读时间（毫秒）<input id="bubble-read" type="number" min="1000" max="10000" value="2800"></label></div><button data-action="save-bubble" class="primary">保存气泡设置</button><p class="hint">完整显示一页后才开始阅读计时；较长页面会自动延长。播放验证中的阅读时间可单独覆盖本值。</p></details>
-      <div id="library" class="list empty">还没有素材包。先导入本次提供的 Ema 验证包。</div>
+      <div id="library" class="list empty">还没有素材包。先导入你自己的角色包。</div>
       <div class="actions bottom"><button data-action="export">导出当前角色包</button><label>导出包版本 <input id="export-version" value="0.2.0" size="12"></label><button data-action="exit" class="quiet">退出应用</button></div>
       <details><summary>全屏检测范围与排除应用</summary><p>仅检测桌宠所在显示器的前台无标题栏全屏窗口；有标题栏的最大化窗口不算全屏。排除项填进程文件名，以逗号分隔。媒体检测使用 Windows 媒体会话，不支持该接口的播放器不会被识别。</p><label>排除应用 <input id="excluded" placeholder="example.exe, another.exe"></label><button data-action="save-excluded">保存</button></details>
     </section>
@@ -136,7 +136,7 @@ export function setupControl(root:HTMLElement){
     const summary=`当前：${s.scheduler.active?statusNames[s.scheduler.active.status]??s.scheduler.active.status:s.scheduler.baseTransition?'姿态过渡':'空闲'}　基础姿态：${s.scheduler.appliedBase} → ${s.scheduler.desiredBase}　${s.scheduler.suppressed?'新主动互动已抑制':'允许主动互动'}`;
     $('#play-state').textContent=summary;$('#diagnostic-state').textContent=summary;
     const lk=JSON.stringify([s.library,s.instances,s.instance?.id]);if(lk!==libraryKey){libraryKey=lk;$('#library').classList.toggle('empty',!s.library.length);
-      $('#library').innerHTML=s.library.map(p=>`<div class="list-row"><div><strong>${esc(p.displayName)}</strong><small>${esc(p.kind==='character'?'角色包':'插件包')} · ${esc(p.version)} · ${p.fileCount} 个文件${p.warnings.length?' · 有资源提示':''}</small></div><div class="actions">${p.kind==='character'?`<button data-action="new" data-hash="${p.hash}">创建新伙伴</button><button data-action="update" data-hash="${p.hash}">更新当前伙伴</button>`:`<button data-action="install" data-hash="${p.hash}">安装插件</button>`}</div></div>`).join('')||'还没有素材包。先导入本次提供的 Ema 验证包。';
+      $('#library').innerHTML=s.library.map(p=>`<div class="list-row"><div><strong>${esc(p.displayName)}</strong><small>${esc(p.kind==='character'?'角色包':'插件包')} · ${esc(p.version)} · ${p.fileCount} 个文件${p.warnings.length?' · 有资源提示':''}</small></div><div class="actions">${p.kind==='character'?`<button data-action="new" data-hash="${p.hash}">创建新伙伴</button><button data-action="update" data-hash="${p.hash}">更新当前伙伴</button>`:`<button data-action="install" data-hash="${p.hash}">安装插件</button>`}</div></div>`).join('')||'还没有素材包。先导入你自己的角色包。';
       $('#instances').innerHTML=s.instances.map(i=>`<option value="${i.id}" ${i.id===s.instance?.id?'selected':''}>${esc(i.name)} · ${i.id.slice(0,8)}</option>`).join('');
     }
     const pk=JSON.stringify([s.plugins,s.configured,s.unknownPresets]);if(pk!==pluginsKey){pluginsKey=pk;$('#plugin-types').innerHTML=s.plugins.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
