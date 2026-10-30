@@ -9,6 +9,8 @@ fn service_migration_defaults_never_enable_capture_or_new_network_services() {
     assert!(!old.p3.vision.enabled);
     assert!(!old.p3.search.enabled);
     assert!(!old.p3.weather_enabled);
+    assert!(!old.p3.device_location_enabled);
+    assert_eq!(old.p3.weather_location_mode, "fixed");
     assert!(old.p3.chat_enabled);
     old.validate().unwrap();
 }
@@ -222,12 +224,70 @@ fn real_public_environment_providers() {
     let w = weather(&settings).unwrap();
     assert_eq!(w["kind"], "model-estimate");
     assert!(w["temperature"].is_number());
-    let cn = calendar::import("CN", 2026).unwrap();
+    eprintln!("Open-Meteo: fresh public-point weather passed");
+    let range = calendar::import_range("CN", 2026, 2027).unwrap();
+    assert_eq!(
+        range.iter().map(|d| d.year).collect::<Vec<_>>(),
+        vec![2026, 2027]
+    );
+    let cn = &range[0];
     assert_eq!(cn.lunar.len(), 365);
     assert!(cn
         .events
         .iter()
         .any(|e| e.name == "春节" && e.date.to_string() == "2026-02-17"));
+    eprintln!("HKO: inclusive 2026—2027 range passed");
     let jp = calendar::import("JP", 2026).unwrap();
     assert!(!jp.events.is_empty());
+    eprintln!("Nager.Date JP: national holidays passed");
+}
+
+#[test]
+fn calendar_range_includes_both_ends_and_batch_failure_keeps_old_data() {
+    assert_eq!(
+        calendar::years(2026, 2028).unwrap().collect::<Vec<_>>(),
+        vec![2026, 2027, 2028]
+    );
+    assert_eq!(calendar::years(2026, 2026).unwrap().count(), 1);
+    for (start, end) in [
+        (2027, 2026),
+        (1901, 1902),
+        (2100, 2101),
+        (2026, 2046),
+        (i32::MIN, i32::MAX),
+    ] {
+        assert!(calendar::years(start, end).is_err());
+    }
+    let root = TestRoot::new();
+    let m = crate::memory::Memory::open(&root.0).unwrap();
+    let owner = uuid::Uuid::new_v4().to_string();
+    let other = uuid::Uuid::new_v4().to_string();
+    let make = |year| calendar::Dataset {
+        country: "ZZ".into(),
+        year,
+        source: "manual".into(),
+        imported_at: String::new(),
+        events: vec![],
+        lunar: vec![],
+    };
+    m.save_calendars(&owner, &[make(2026), make(2027), make(2028)])
+        .unwrap();
+    assert_eq!(m.calendar_data(&owner).unwrap().len(), 3);
+    assert!(m.calendar_data(&other).unwrap().is_empty());
+    let before = serde_json::to_value(m.calendar_data(&owner).unwrap()).unwrap();
+    assert!(m.save_calendars(&owner, &[make(2029), make(2101)]).is_err());
+    assert_eq!(
+        serde_json::to_value(m.calendar_data(&owner).unwrap()).unwrap(),
+        before
+    );
+    assert!(m.save_calendars(&owner, &[make(2029), make(2029)]).is_err());
+    let full = (2001..=2020).map(make).collect::<Vec<_>>();
+    m.clear_calendar(&owner).unwrap();
+    m.save_calendars(&owner, &full).unwrap();
+    assert!(m.check_calendar_capacity(&owner, "ZZ", 2021, 2021).is_err());
+    assert!(m.save_calendars(&owner, &[make(2021)]).is_err());
+    assert_eq!(m.calendar_data(&owner).unwrap().len(), 20);
+    m.check_calendar_capacity(&owner, "ZZ", 2001, 2020).unwrap();
+    m.save_calendar(&owner, &make(2001)).unwrap();
+    assert_eq!(m.calendar_data(&owner).unwrap().len(), 20);
 }

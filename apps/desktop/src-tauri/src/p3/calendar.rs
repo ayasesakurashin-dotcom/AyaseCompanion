@@ -147,6 +147,22 @@ fn download(url: &str) -> Result<String, String> {
     }
     String::from_utf8(bytes).map_err(|_| "日历编码无效".into())
 }
+pub fn years(start: i32, end: i32) -> Result<std::ops::RangeInclusive<i32>, String> {
+    if !(1902..=2100).contains(&start) || !(start..=2100).contains(&end) || end - start >= 20 {
+        return Err(
+            "起止年份需在1902—2100年之间，结束年不早于开始年，一次最多20年（包含两端）".into(),
+        );
+    }
+    Ok(start..=end)
+}
+pub fn import_range(country: &str, start: i32, end: i32) -> Result<Vec<Dataset>, String> {
+    years(start, end)?
+        .map(|year| {
+            import(country, year)
+                .map_err(|e| format!("{country} {year}年：{e}。本次区间未写入，已有日历保留"))
+        })
+        .collect()
+}
 pub fn import(country: &str, year: i32) -> Result<Dataset, String> {
     let country = country.to_ascii_uppercase();
     if country.len() != 2

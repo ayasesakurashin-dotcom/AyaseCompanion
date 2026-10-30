@@ -1451,6 +1451,7 @@ pub fn run() {
             p3::capability_request,
             p3::p3_action,
             p3::environment_lookup,
+            p3::request_location_access,
             p3::pointer_event,
             p3::save_capabilities,
             p3::capability_probe,

@@ -86,3 +86,74 @@ fn budget_survives_restart_and_preview_data_never_crosses_instances() {
     h.p3_tick(Utc::now(), None, None);
     assert!(h.scheduler.tasks.is_empty());
 }
+
+#[test]
+fn late_weather_is_rejected_and_stale_pending_care_never_interrupts_presenting_reply() {
+    let (_root, mut h) = fixture();
+    h.ai.settings.p3.weather_enabled = true;
+    h.ai.settings.p3.city = "Synthetic".into();
+    h.ai.settings.p3.latitude = Some(35.);
+    h.ai.settings.p3.longitude = Some(139.);
+    h.update_weather_configuration();
+    let signature = capability::weather::signature(&h.ai.settings.p3);
+    let now = Utc::now();
+    let fact = json!({"sampledAt":now.to_rfc3339(),"fetchedAt":now.to_rfc3339(),"temperature":20,"code":1,"city":"Synthetic"});
+    h.accept_weather(&signature, Ok(fact.clone()));
+    assert!(h.current_weather(now).is_some());
+    assert!(h
+        .current_weather(now + chrono::Duration::seconds(900))
+        .is_none());
+    let id = h
+        .present(
+            json!({"id":"care","text":"Synthetic weather"}),
+            "host.user",
+            Priority::User,
+            false,
+            60_000,
+            0,
+        )
+        .unwrap();
+    h.p3.weather_grants
+        .insert(id, (signature.clone(), fact.clone(), h.now()));
+    assert!(h.weather_start_valid(id));
+    h.ai.settings.p3.city = "Other".into();
+    h.update_weather_configuration();
+    h.accept_weather(&signature, Ok(fact.clone()));
+    assert!(h.p3.weather.is_none());
+    assert!(!h.generation_start_valid(id));
+    assert_eq!(
+        h.scheduler
+            .tasks
+            .iter()
+            .find(|t| t.id == id)
+            .unwrap()
+            .status,
+        ayase_core::scheduler::Status::Expired
+    );
+    let signature = capability::weather::signature(&h.ai.settings.p3);
+    h.accept_weather(&signature, Ok(fact.clone()));
+    let id = h
+        .present(
+            json!({"id":"care2","text":"Synthetic weather"}),
+            "host.user",
+            Priority::User,
+            false,
+            60_000,
+            0,
+        )
+        .unwrap();
+    h.p3.weather_grants.insert(id, (signature, fact, h.now()));
+    h.scheduler.tick(h.now());
+    let generation = h
+        .scheduler
+        .tasks
+        .iter()
+        .find(|t| t.id == id)
+        .unwrap()
+        .generation;
+    assert!(h.scheduler.started(id, generation, h.now()));
+    h.ai.settings.p3.weather_enabled = false;
+    h.update_weather_configuration();
+    assert!(h.weather_start_valid(id));
+    assert_eq!(h.scheduler.active().unwrap().id, id);
+}

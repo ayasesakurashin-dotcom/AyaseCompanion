@@ -4,6 +4,7 @@ use ayase_core::behavior;
 use std::sync::mpsc::{self, Receiver};
 #[cfg(test)]
 mod tests;
+mod weather;
 struct Ticket {
     instance: String,
     epoch: u64,
@@ -21,6 +22,13 @@ pub(super) struct P3 {
     next_weather: u64,
     weather: Option<Value>,
     weather_settings: String,
+    weather_cancel: Arc<std::sync::atomic::AtomicBool>,
+    weather_usable: bool,
+    weather_grants: BTreeMap<u64, (String, Value, u64)>,
+    calendar_revisions: BTreeMap<String, u64>,
+    weather_received: u64,
+    location_access: String,
+    next_access_check: u64,
     weather_rx: Option<Receiver<(String, Result<Value, String>)>>,
     observation_summary: Option<Receiver<(String, u64, u64, u64, u64, Result<String, String>)>>,
     next_summary: u64,
@@ -29,9 +37,9 @@ pub(super) struct P3 {
 impl Host {
     pub(super) fn p3_snapshot(&self) -> Value {
         if self.instance().is_none_or(|i| i.id != self.p3.owner) {
-            return json!({"info":null,"weather":self.p3.weather,"statuses":{},"manualWork":false,"manualRest":false});
+            return json!({"info":null,"weather":self.p3.weather,"environment":self.weather_snapshot(),"statuses":{},"manualWork":false,"manualRest":false});
         }
-        json!({"info":self.p3.info,"weather":self.p3.weather,"statuses":self.p3.status,"manualWork":self.p3.manual_work,"manualRest":self.p3.manual_rest})
+        json!({"info":self.p3.info,"weather":self.p3.weather,"environment":self.weather_snapshot(),"statuses":self.p3.status,"manualWork":self.p3.manual_work,"manualRest":self.p3.manual_rest})
     }
     fn capability_target(&self, app: &tauri::AppHandle) -> Result<screen::Target, String> {
         let mut target = screen::prepare(&self.ai.settings.p3)?;
@@ -146,47 +154,7 @@ impl Host {
             self.p3.tickets.clear();
             screen::invalidate();
         }
-        if let Some(rx) = &self.p3.weather_rx {
-            if let Ok((settings, result)) = rx.try_recv() {
-                if settings == serde_json::to_string(&self.ai.settings.p3).unwrap() {
-                    match result {
-                        Ok(v) => {
-                            self.p3.weather = Some(v);
-                            self.p3
-                                .status
-                                .insert("weather".into(), "天气已更新：指定地点的模型估算".into());
-                        }
-                        Err(e) => {
-                            self.p3.weather = None;
-                            self.p3.status.insert("weather".into(), e);
-                        }
-                    }
-                }
-                self.p3.weather_rx = None;
-            }
-        }
-        let signature = serde_json::to_string(&self.ai.settings.p3).unwrap();
-        if self.p3.weather_settings != signature {
-            self.p3.weather_settings = signature.clone();
-            self.p3.next_weather = 0;
-            self.p3.weather = None;
-        }
-        if self.ai.settings.p3.weather_enabled
-            && now >= self.p3.next_weather
-            && self.p3.weather_rx.is_none()
-        {
-            self.p3.next_weather = now + 900_000;
-            let settings = self.ai.settings.p3.clone();
-            let (tx, rx) = mpsc::channel();
-            self.p3.weather_rx = Some(rx);
-            std::thread::spawn(move || {
-                let result = capability::weather(&settings);
-                let _ = tx.send((signature, result));
-            });
-        }
-        if !self.ai.settings.p3.weather_enabled {
-            self.p3.weather = None;
-        }
+        self.weather_tick(wall);
         if now >= self.p3.next_refresh {
             self.p3.next_refresh = now + 1000;
             self.p3.info = json!({"observationSummary":self.ai.memory.observation_summary(&owner).unwrap_or(Value::Null),"observations":self.ai.memory.observations(&owner).unwrap_or_default(),"calendar":self.ai.memory.calendar_data(&owner).unwrap_or_default(),"specialDates":self.ai.memory.special_dates(&owner).unwrap_or_default(),"localSamples":capability::samples::list(&self.root,&owner).unwrap_or_default()});
@@ -232,17 +200,7 @@ impl Host {
             let (date, _, _, _) =
                 plugin::wall_parts(wall, c.config["timeZone"].as_str().unwrap_or("system"));
             let date = chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d").unwrap();
-            let weather = self
-                .p3
-                .weather
-                .as_ref()
-                .filter(|w| {
-                    w["fetchedAt"]
-                        .as_str()
-                        .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-                        .is_some_and(|t| (wall - t.with_timezone(&Utc)).num_minutes().abs() < 60)
-                })
-                .cloned();
+            let weather = self.current_weather(wall).cloned();
             let input=behavior::Input{monotonic_ms:now,idle_seconds:idle,manual_work:self.p3.manual_work,manual_rest:self.p3.manual_rest,pointer:pointer.clone(),weather,calendar:if self.ai.settings.p3.calendar_enabled{datasets.iter().flat_map(|d|d.today(date)).collect()}else{vec![]},special:dates.iter().filter(|d|d.occurs(date,&datasets)).map(|d|json!({"name":d.name,"date":date,"calendar":d.calendar,"source":"用户手动保存"})).collect()};
             let Some(candidate) = behavior::evaluate(&kind, &c, &input, wall, unit(), &mut state)
             else {
@@ -320,6 +278,16 @@ impl Host {
             };
             match result {
                 Ok(id) => {
+                    if kind == "weather-care" {
+                        self.p3.weather_grants.insert(
+                            id,
+                            (
+                                capability::weather::signature(&self.ai.settings.p3),
+                                candidate.facts.clone(),
+                                self.p3.weather_received,
+                            ),
+                        );
+                    }
                     accepted_any = true;
                     behavior::accepted(&c, &kind, &candidate.key, now, unit(), &mut state);
                     state
@@ -535,6 +503,10 @@ pub(super) fn p3_action(
         }
         "clear-calendar" => {
             h.ai.memory.clear_calendar(&instance_id)?;
+            *h.p3
+                .calendar_revisions
+                .entry(instance_id.clone())
+                .or_default() += 1;
             h.p3.next_refresh = 0;
         }
         "remove-observation" => {
@@ -618,11 +590,36 @@ pub(super) async fn environment_lookup(
             return Err("伙伴已切换".into());
         }
     }
+    if action == "weather" {
+        let mut h = shared.lock().unwrap();
+        h.update_weather_configuration();
+        h.begin_weather_refresh()?;
+        return Ok(json!({"queued":true}));
+    }
+    let (epoch, calendar_revision) = {
+        let h = shared.lock().unwrap();
+        (
+            h.ai.memory.epoch(&instance_id)?,
+            h.p3.calendar_revisions
+                .get(&instance_id)
+                .copied()
+                .unwrap_or(0),
+        )
+    };
     tauri::async_runtime::spawn_blocking(move||match action.as_str(){
         "city"=>capability::geocode(value.as_str().ok_or("地点名称缺失")?),
-        "weather"=>{let settings=shared.lock().unwrap().ai.settings.p3.clone();let result=capability::weather(&settings)?;let mut h=shared.lock().unwrap();if serde_json::to_string(&h.ai.settings.p3).unwrap()==serde_json::to_string(&settings).unwrap(){h.p3.weather=Some(result.clone());h.p3.next_weather=h.now()+900_000;}Ok(result)},
-        "calendar"=>{let country=value["country"].as_str().ok_or("国家缺失")?;let year=value["year"].as_i64().ok_or("年份缺失")?;let set=calendar::import(country,i32::try_from(year).map_err(|_|"年份无效")?)?;let mut h=shared.lock().unwrap();h.ai.memory.save_calendar(&instance_id,&set)?;h.p3.next_refresh=0;Ok(json!({"country":set.country,"year":set.year,"events":set.events.len(),"source":set.source}))},
-        "calendar-file"=>{let path=std::path::Path::new(value.as_str().ok_or("日历文件缺失")?);if path.extension().is_none_or(|e|!e.eq_ignore_ascii_case("json"))||fs::metadata(path).map_err(|_|"日历文件不可读")?.len()>1_000_000{return Err("请选择不超过1MB的日历JSON文件".into());}let bytes=fs::read(path).map_err(|_|"日历文件不可读")?;let mut set:calendar::Dataset=serde_json::from_slice(&bytes).map_err(|_|"日历格式无效，请参考P3指南")?;set.source="manual".into();set.imported_at=Utc::now().to_rfc3339();set.validate()?;let mut h=shared.lock().unwrap();h.ai.memory.save_calendar(&instance_id,&set)?;h.p3.next_refresh=0;Ok(json!({"country":set.country,"year":set.year,"events":set.events.len(),"source":"用户明确导入的日期表"}))},
+        "calendar"=>{
+            let country=value["country"].as_str().ok_or("国家缺失")?;
+            let year=|name:&str| value[name].as_i64().and_then(|y|i32::try_from(y).ok()).ok_or("起止年份无效");
+            let start=year("start")?;let end=year("end")?;calendar::years(start,end)?;
+            {let h=shared.lock().unwrap();h.ai.memory.check_calendar_capacity(&instance_id,country,start,end)?;}
+            let sets=calendar::import_range(country,start,end)?;
+            let mut h=shared.lock().unwrap();
+            if h.store.active.as_deref()!=Some(&instance_id)||h.ai.memory.epoch(&instance_id)?!=epoch||h.p3.calendar_revisions.get(&instance_id).copied().unwrap_or(0)!=calendar_revision{return Err("伙伴或日历已更改，本次区间未写入".into());}
+            h.ai.memory.save_calendars(&instance_id,&sets)?;*h.p3.calendar_revisions.entry(instance_id.clone()).or_default()+=1;h.p3.next_refresh=0;
+            Ok(json!({"country":country,"start":start,"end":end,"years":sets.len(),"events":sets.iter().map(|s|s.events.len()).sum::<usize>()}))
+        },
+        "calendar-file"=>{let path=std::path::Path::new(value.as_str().ok_or("日历文件缺失")?);if path.extension().is_none_or(|e|!e.eq_ignore_ascii_case("json"))||fs::metadata(path).map_err(|_|"日历文件不可读")?.len()>1_000_000{return Err("请选择不超过1MB的日历JSON文件".into());}let bytes=fs::read(path).map_err(|_|"日历文件不可读")?;let mut set:calendar::Dataset=serde_json::from_slice(&bytes).map_err(|_|"日历格式无效，请参考P3指南")?;set.source="manual".into();set.imported_at=Utc::now().to_rfc3339();set.validate()?;let mut h=shared.lock().unwrap();if h.store.active.as_deref()!=Some(&instance_id)||h.ai.memory.epoch(&instance_id)?!=epoch||h.p3.calendar_revisions.get(&instance_id).copied().unwrap_or(0)!=calendar_revision{return Err("伙伴或日历已更改，文件未导入".into());}h.ai.memory.save_calendar(&instance_id,&set)?;*h.p3.calendar_revisions.entry(instance_id.clone()).or_default()+=1;h.p3.next_refresh=0;Ok(json!({"country":set.country,"year":set.year,"events":set.events.len(),"source":"用户明确导入的日期表"}))},
         _=>Err("未知环境服务".into()),
     }).await.map_err(|_|"环境服务未完成")?
 }
@@ -682,6 +679,7 @@ pub(super) fn save_capabilities(
     h.ai.vault.save(&all, &keys)?;
     h.ai.public_services = h.ai.vault.public(&all);
     h.ai.settings = all;
+    h.update_weather_configuration();
     h.p3.tickets.clear();
     screen::invalidate();
     Ok(())
@@ -750,4 +748,54 @@ pub(super) fn local_sample_action(
     };
     h.p3.next_refresh = 0;
     result
+}
+
+#[tauri::command]
+pub(super) async fn request_location_access(
+    window: WebviewWindow,
+    state: State<'_, Shared>,
+) -> Result<String, String> {
+    control(&window)?;
+    if !window.is_focused().unwrap_or(false) {
+        return Err("请在前台控制台申请 Windows 位置权限".into());
+    }
+    let signature = {
+        let h = state.lock().unwrap();
+        if !h.ai.settings.p3.device_location_enabled {
+            return Err("请先勾选允许读取设备位置，并保存能力设置".into());
+        }
+        capability::weather::signature(&h.ai.settings.p3)
+    };
+    #[cfg(windows)]
+    let allowed = {
+        let (tx, rx) = mpsc::sync_channel(1);
+        let app = window.app_handle().clone();
+        app.run_on_main_thread(move || {
+            let result = if window.is_focused().unwrap_or(false) {
+                capability::location::request_access()
+            } else {
+                Err("请保持控制台在前台".into())
+            };
+            let _ = tx.send(result);
+        })
+        .map_err(|_| "系统定位申请不可用")?;
+        tauri::async_runtime::spawn_blocking(move || {
+            let op = rx
+                .recv_timeout(Duration::from_secs(5))
+                .map_err(|_| "系统定位申请未开始")??;
+            capability::location::wait(op, 120, &std::sync::atomic::AtomicBool::new(false))
+                .map(|s| s == windows::Devices::Geolocation::GeolocationAccessStatus::Allowed)
+        })
+        .await
+        .map_err(|_| "系统定位申请未完成")??
+    };
+    #[cfg(not(windows))]
+    let allowed = false;
+    let mut h = state.lock().unwrap();
+    if signature != capability::weather::signature(&h.ai.settings.p3) {
+        return Err("位置设置已更改，本次权限回执未应用".into());
+    }
+    h.p3.next_access_check = 0;
+    h.p3.next_weather = 0;
+    Ok(if allowed{"Windows 已允许定位，天气启用时会自动读取；若无结果，请检查系统定位服务"}else{"Windows 尚未允许定位。请检查 Windows 设置 → 隐私和安全性 → 位置 → 定位服务及桌面应用权限；也可使用固定地点"}.into())
 }

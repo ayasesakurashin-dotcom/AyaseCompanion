@@ -1,9 +1,13 @@
 //! P3 capability adapters. They return evidence; only the host grants presentation.
 pub mod calendar;
+pub mod location;
 pub mod samples;
 pub mod screen;
 pub mod search;
 mod store;
+pub mod weather;
+#[cfg(test)]
+pub use weather::fetch as weather;
 #[cfg(test)]
 mod tests;
 use crate::services::{self, Provider};
@@ -25,6 +29,8 @@ pub struct Settings {
     pub excluded_windows: Vec<String>,
     pub observation_ttl_seconds: u64,
     pub weather_enabled: bool,
+    pub weather_location_mode: String,
+    pub device_location_enabled: bool,
     pub calendar_enabled: bool,
     pub city: String,
     pub latitude: Option<f64>,
@@ -49,6 +55,8 @@ impl Default for Settings {
             excluded_windows: vec![],
             observation_ttl_seconds: 300,
             weather_enabled: false,
+            weather_location_mode: "fixed".into(),
+            device_location_enabled: false,
             calendar_enabled: false,
             city: String::new(),
             latitude: None,
@@ -102,7 +110,11 @@ impl Settings {
         {
             return Err("地点坐标无效".into());
         }
+        if !["fixed", "device"].contains(&self.weather_location_mode.as_str()) {
+            return Err("天气地点来源无效".into());
+        }
         if self.weather_enabled
+            && self.weather_location_mode == "fixed"
             && (self.city.trim().is_empty() || self.latitude.is_none() || self.longitude.is_none())
         {
             return Err("天气需要先选择固定地点".into());
@@ -214,42 +226,5 @@ pub fn geocode(city: &str) -> Result<Value, String> {
                 ("format", "json"),
             ])
             .send(),
-    )
-}
-pub fn weather(s: &Settings) -> Result<Value, String> {
-    if !s.weather_enabled {
-        return Err("天气服务已关闭".into());
-    }
-    s.validate()?;
-    let latitude = s.latitude.ok_or("地点未配置")?.to_string();
-    let longitude = s.longitude.ok_or("地点未配置")?.to_string();
-    let v = services::json_response(
-        services::client(15)?
-            .get("https://api.open-meteo.com/v1/forecast")
-            .query(&[
-                ("latitude", latitude.as_str()),
-                ("longitude", longitude.as_str()),
-                ("current", "temperature_2m,weather_code,wind_speed_10m"),
-                ("timezone", "UTC"),
-            ])
-            .send(),
-    )?;
-    let time = v["current"]["time"].as_str().ok_or("天气缺少采样时间")?;
-    let sample = chrono::NaiveDateTime::parse_from_str(time, "%Y-%m-%dT%H:%M")
-        .map_err(|_| "天气采样时间无效")?
-        .and_utc();
-    if (chrono::Utc::now() - sample).num_minutes().abs() > 90 {
-        return Err("天气事实已过期".into());
-    }
-    let t = v["current"]["temperature_2m"]
-        .as_f64()
-        .filter(|n| n.is_finite() && (-90.0..=65.0).contains(n))
-        .ok_or("天气温度无效")?;
-    let code = v["current"]["weather_code"]
-        .as_u64()
-        .filter(|n| *n <= 99)
-        .ok_or("天气代码无效")?;
-    Ok(
-        json!({"city":s.city,"latitude":s.latitude,"longitude":s.longitude,"temperature":t,"code":code,"windKmh":v["current"]["wind_speed_10m"],"sampledAt":sample.to_rfc3339(),"fetchedAt":chrono::Utc::now().to_rfc3339(),"source":"https://open-meteo.com/","kind":"model-estimate"}),
     )
 }

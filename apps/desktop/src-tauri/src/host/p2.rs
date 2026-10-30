@@ -211,6 +211,9 @@ impl Host {
         }
     }
     pub(super) fn generation_start_valid(&mut self, id: u64) -> bool {
+        if !self.weather_start_valid(id) {
+            return false;
+        }
         let Some(job) = self.ai.jobs.get(&id) else {
             return true;
         };

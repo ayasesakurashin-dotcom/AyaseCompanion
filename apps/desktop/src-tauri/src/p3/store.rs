@@ -158,13 +158,45 @@ impl Memory {
         }
     }
     pub fn save_calendar(&self, instance: &str, set: &Dataset) -> Result<(), String> {
-        set.validate()?;
-        let mut data = self.calendar_data(instance)?;
-        data.retain(|d| d.country != set.country || d.year != set.year);
-        if data.len() >= 20 {
+        self.save_calendars(instance, std::slice::from_ref(set))
+    }
+    pub fn check_calendar_capacity(
+        &self,
+        instance: &str,
+        country: &str,
+        start: i32,
+        end: i32,
+    ) -> Result<(), String> {
+        let years = super::calendar::years(start, end)?;
+        let kept = self
+            .calendar_data(instance)?
+            .iter()
+            .filter(|d| d.country != country || !years.contains(&d.year))
+            .count();
+        if kept + years.count() > 20 {
             return Err("日历最多保留20组国家年份，请先删除旧数据".into());
         }
-        data.push(set.clone());
+        Ok(())
+    }
+    pub fn save_calendars(&self, instance: &str, sets: &[Dataset]) -> Result<(), String> {
+        let mut seen = std::collections::BTreeSet::new();
+        for set in sets {
+            set.validate()?;
+            if !seen.insert((&set.country, set.year)) {
+                return Err("日历区间包含重复国家年份".into());
+            }
+        }
+        let mut data = self.calendar_data(instance)?;
+        data.retain(|d| {
+            !sets
+                .iter()
+                .any(|s| s.country == d.country && s.year == d.year)
+        });
+        if data.len() + sets.len() > 20 {
+            return Err("日历最多保留20组国家年份，请先删除旧数据".into());
+        }
+        data.extend_from_slice(sets);
+        data.sort_by(|a, b| (&a.country, a.year).cmp(&(&b.country, b.year)));
         self.write_p3(instance, "calendar", &serde_json::to_value(data).unwrap())
     }
     pub fn save_special(&self, instance: &str, dates: &[SpecialDate]) -> Result<(), String> {
