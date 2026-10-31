@@ -145,13 +145,51 @@ pub fn validate_response(response: &Value) -> Result<(), String> {
         if !ids.insert(v["id"].as_str().unwrap()) {
             return Err("回复变体 id 重复".into());
         }
-        if v["text"].as_str().is_some_and(|s| !s.is_empty())
-            && v["textAsset"].as_str().is_some_and(|s| !s.is_empty())
-        {
+        let text = material_values(&v["text"], false)?;
+        let text_assets = material_values(&v["textAsset"], true)?;
+        material_values(&v["audioAsset"], true)?;
+        material_values(&v["cue"], true)?;
+        if !text.is_empty() && !text_assets.is_empty() {
             return Err("text 与 textAsset 必须二选一".into());
+        }
+        if text.iter().map(|s| s.chars().count()).sum::<usize>() > 12000 {
+            return Err("同一条回复的文字合计不能超过12000字".into());
         }
     }
     Ok(())
+}
+/// IDs accept comma/newline shorthand; literal text keeps punctuation and line breaks.
+/// The same bounded normalization is used by validation and the host resolver.
+pub fn material_values(value: &Value, identifiers: bool) -> Result<Vec<String>, String> {
+    let values: Vec<&str> = match value {
+        Value::Null => vec![],
+        Value::String(s) => vec![s],
+        Value::Array(a) => a
+            .iter()
+            .map(|v| v.as_str().ok_or("素材条目必须是文字"))
+            .collect::<Result<_, _>>()?,
+        _ => return Err("素材必须是文字或文字列表".into()),
+    };
+    let out: Vec<String> = values
+        .into_iter()
+        .flat_map(|s| {
+            if identifiers {
+                s.split([',', '，', '\n', '\r'])
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_owned)
+                    .collect()
+            } else if s.trim().is_empty() {
+                vec![]
+            } else {
+                vec![s.to_owned()]
+            }
+        })
+        .collect();
+    if out.len() > 32 || (identifiers && out.iter().any(|s| s.chars().count() > 128)) {
+        return Err("每种素材最多32条，素材编号最多128字".into());
+    }
+    Ok(out)
 }
 impl Plugin {
     pub fn from_files(m: Value, files: &BTreeMap<String, Vec<u8>>) -> Result<Self, String> {
@@ -518,6 +556,31 @@ mod tests {
         for u in [0.0, 0.8] {
             let v = choose_variant(&r, u).unwrap();
             assert_eq!(v["text"], v["audioAsset"]);
+        }
+    }
+    #[test]
+    fn material_sequences_validate_without_splitting_literal_text() {
+        let r = serde_json::json!({"mode":"fixed","variants":[{"id":"s","text":["A, B\nC","第二段"],"audioAsset":"voice.one,voice.two\nvoice.one","cue":["greeting","greeting"]}]});
+        validate_response(&r).unwrap();
+        assert_eq!(
+            material_values(&r["variants"][0]["text"], false).unwrap(),
+            vec!["A, B\nC", "第二段"]
+        );
+        assert_eq!(
+            material_values(&r["variants"][0]["audioAsset"], true).unwrap(),
+            vec!["voice.one", "voice.two", "voice.one"]
+        );
+        validate_response(&serde_json::json!({"mode":"generated-with-fallback","intent":"test","fallback":r["variants"]})).unwrap();
+        for variant in [
+            serde_json::json!({"id":"x","text":["A"],"textAsset":["B"]}),
+            serde_json::json!({"id":"x","text":["A".repeat(7000),"B".repeat(7000)]}),
+            serde_json::json!({"id":"x","audioAsset":"x,".repeat(33)}),
+            serde_json::json!({"id":"x","cue":[2]}),
+        ] {
+            assert!(
+                validate_response(&serde_json::json!({"mode":"fixed","variants":[variant]}))
+                    .is_err()
+            );
         }
     }
     #[test]

@@ -79,10 +79,8 @@ impl Host {
             }
             Ok(id)
         } else {
-            let unit = unit();
-            let v = plugin::choose_variant(&candidate.response, unit).ok_or("固定回复未配置")?;
-            self.present(
-                v,
+            self.present_variants(
+                candidate.response.clone(),
                 &c.owner,
                 c.priority,
                 candidate.proactive,

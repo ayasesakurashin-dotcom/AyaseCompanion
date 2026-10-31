@@ -65,7 +65,9 @@ export function setupPet(root:HTMLElement,bridge:PetBridge={invoke,assetUrl:conv
       const plan=task.plan;
       const progress=(text:string)=>{if(!alive())return;const now=performance.now();if(text!==lastProgressText&&(now-lastProgress>=250||text===current?.plan.text)){lastProgress=now;lastProgressText=text;void bridge.invoke('text_progress',{id:task.id,generation:task.generation,text});}};
       if(plan.stream){bubble.startStream(plan.text??'',plan.readMs,failed=>done('text',failed||!!current?.plan.serviceError),progress);bubble.append(plan.text??'',!!plan.streamDone);streamAudio(task);}
+      else if(plan.textSegments?.length)bubble.startSequence(plan.textSegments,plan.readMs,failed=>done('text',failed),progress);
       else if(plan.text)bubble.start(plan.text,plan.readMs,failed=>done('text',failed),progress);
+      if(!plan.stream&&plan.audioSegments?.length)streamAudio(task);
       if(plan.clips?.length){try{renderer.playFinite(plan.clips,plan.repeat??1,()=>done('animation'),!!task.targetBase);}catch{done('animation',true);}}
       if(plan.audioPath&&task.channels.audio==='pending'){
         // Decode stalls and device failures release only the failed audio channel.

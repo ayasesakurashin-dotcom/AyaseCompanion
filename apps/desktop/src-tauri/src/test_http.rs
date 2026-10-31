@@ -30,7 +30,9 @@ impl Server {
                     Ok((stream, _)) => {
                         let captured = captured.clone();
                         thread::spawn(move || {
-                            let _ = respond(stream, captured);
+                            if let Err(error) = respond(stream, captured) {
+                                eprintln!("synthetic HTTP fixture read/write: {error}");
+                            }
                         });
                     }
                     Err(_) => thread::sleep(Duration::from_millis(10)),
@@ -60,6 +62,10 @@ fn response(stream: &mut TcpStream, status: &str, kind: &str, data: &[u8]) -> st
     Ok(())
 }
 fn respond(mut stream: TcpStream, requests: Arc<Mutex<Vec<Value>>>) -> std::io::Result<()> {
+    // Windows may inherit the nonblocking listener's mode. A worker reads a
+    // complete HTTP request synchronously; WouldBlock here used to randomly
+    // drop accepted sockets before headers arrived and abort the test client.
+    stream.set_nonblocking(false)?;
     stream.set_read_timeout(Some(Duration::from_secs(3)))?;
     let mut bytes = vec![];
     let header_end = loop {

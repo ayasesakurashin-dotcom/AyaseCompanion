@@ -74,6 +74,8 @@ dialog .section-title{margin:0 0 10px}
 dialog .section-title button{font-size:20px;border:0;background:none}
 .field{margin:12px 0}
 .field>label{font-size:12px;margin-bottom:7px}
+.field>small{display:block;margin-top:8px}
+.field>button{margin-top:8px}
 .field>input:not([type=checkbox]),.field>select{width:100%}
 fieldset{border:1px solid var(--line);border-radius:8px;margin:0;padding:10px 14px}
 

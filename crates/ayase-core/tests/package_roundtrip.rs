@@ -199,3 +199,25 @@ fn complete_export_does_not_restore_default_reply_rows() {
     );
     assert_eq!(c.config["response"]["variants"][0]["id"], "custom");
 }
+#[test]
+fn material_arrays_keep_order_duplicates_and_deletions_through_form_and_package() {
+    let p = nightly();
+    let mut base = p.manifest["defaults"].clone();
+    base["response"] = json!({"mode":"fixed","variants":[{"id":"sequence","text":["A, B\nC","second","remove"],"audioAsset":["one","two","one"],"cue":["greeting","greeting"]}]});
+    let mut edited = base.clone();
+    edited["response"]["variants"][0]["text"] = json!(["A, B\nC", "second"]);
+    edited["response"]["variants"][0]["audioAsset"] = json!(["two", "one", "two"]);
+    let patch = ayase_core::config::from_form(&base, &edited);
+    let effective = ayase_core::config::effective(&base, &json!({}), &patch);
+    assert_eq!(effective, edited);
+    p.validate_config(&effective).unwrap();
+    let (files, mut manifest) = fixture();
+    let preset = json!({"presetId":"sequence","pluginId":"example.nightly-rest","configVersion":"1.0","configMode":"complete","enabled":true,"config":effective});
+    manifest["pluginPresets"] = json!([preset.clone()]);
+    let package = validate(&pack(files, manifest, "manifest.json").unwrap()).unwrap();
+    let roundtrip =
+        validate(&pack(package.files.clone(), package.manifest, "manifest.json").unwrap()).unwrap();
+    let actual = &roundtrip.manifest["pluginPresets"][0];
+    assert_eq!(actual, &preset);
+    assert_eq!(p.configure(actual, &json!({}), 0).config, edited);
+}

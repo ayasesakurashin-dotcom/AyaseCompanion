@@ -22,6 +22,7 @@ use uuid::Uuid;
 mod hit_testing;
 mod p2;
 mod p3;
+mod variants;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -456,15 +457,15 @@ impl Host {
         for (c, output) in outputs {
             match output {
                 Output::Present(response, ttl) => {
-                    let random = (Uuid::new_v4().as_u128() >> 64) as f64 / u64::MAX as f64;
                     if response["mode"] != "fixed" {
                         if let Err(e) = self
                             .generate(response, &c.owner, c.priority, true, ttl, c.revision, None)
                         {
                             self.ai.notice = e;
                         }
-                    } else if let Some(v) = plugin::choose_variant(&response, random) {
-                        if let Err(e) = self.present(v, &c.owner, c.priority, true, ttl, c.revision)
+                    } else {
+                        if let Err(e) = self
+                            .present_variants(response, &c.owner, c.priority, true, ttl, c.revision)
                         {
                             let now = self.now();
                             self.scheduler.record(
@@ -492,46 +493,65 @@ impl Host {
             plan["readMs"] = json!(read_ms);
         }
         let mut channels = vec![];
-        let text = v["text"]
-            .as_str()
-            .map(str::to_owned)
-            .or_else(|| v["textAsset"].as_str().and_then(|id| p.asset_text(id)));
-        if let Some(text) = text.filter(|s| !s.trim().is_empty()) {
-            plan["text"] = json!(text);
+        let mut texts = plugin::material_values(&v["text"], false)?;
+        if texts.is_empty() {
+            texts = plugin::material_values(&v["textAsset"], true)?
+                .iter()
+                .filter_map(|id| p.asset_text(id))
+                .filter(|s| !s.trim().is_empty())
+                .collect();
+        }
+        if texts.iter().map(|s| s.chars().count()).sum::<usize>() > 12000 {
+            return Err("同一条回复的文字素材合计不能超过12000字".into());
+        }
+        let texts: Vec<_> = texts.into_iter().map(|s| s.replace("\r\n", "\n")).collect();
+        if !texts.is_empty() {
+            plan["text"] = json!(texts.join("\n"));
+            plan["textSegments"] = json!(texts);
             channels.push("text".into());
         }
-        if let Some(id) = v["audioAsset"].as_str() {
-            if let Some(path) = p.manifest["assets"][id]["path"]
+        let mut audio = vec![];
+        for id in plugin::material_values(&v["audioAsset"], true)? {
+            if let Some(path) = p.manifest["assets"][&id]["path"]
                 .as_str()
-                .filter(|_| self.asset_enabled(id))
+                .filter(|_| self.asset_enabled(&id))
             {
-                if p.manifest["assets"][id]["kind"] == "audio"
+                if p.manifest["assets"][&id]["kind"] == "audio"
                     && p.files.contains_key(path)
                     && !self.store.muted
                 {
-                    plan["audioPath"] = json!(self
+                    let path = self
                         .root
                         .join("packages")
                         .join(&p.report.hash)
                         .join("content")
                         .join(path)
-                        .to_string_lossy());
-                    plan["audioDurationMs"] = p.manifest["assets"][id]["durationMs"].clone();
-                    channels.push("audio".into());
+                        .to_string_lossy()
+                        .into_owned();
+                    audio.push(
+                        json!({"path":path,"durationMs":p.manifest["assets"][&id]["durationMs"]}),
+                    );
                 }
             }
         }
-        if let Some(cue) = v["cue"].as_str() {
+        if !audio.is_empty() {
+            plan["audioSegments"] = json!(audio);
+            plan["audioDone"] = json!(true);
+            channels.push("audio".into());
+        }
+        let mut clips = vec![];
+        for cue in plugin::material_values(&v["cue"], true)? {
             let model = p.model.as_ref().unwrap();
             let mapping = i.overrides["semanticCues"]
-                .get(cue)
-                .or_else(|| model["semanticCues"].get(cue));
+                .get(&cue)
+                .or_else(|| model["semanticCues"].get(&cue));
             if let Some(mapping) = mapping {
                 if let Some(clip) = mapping["clip"].as_str() {
                     if model["clips"][clip].is_object() {
-                        plan["clips"] = json!([clip]);
-                        plan["repeat"] = json!(mapping["repeat"].as_u64().unwrap_or(1).clamp(1, 8));
-                        channels.push("animation".into());
+                        clips.extend(std::iter::repeat_n(
+                            clip.to_owned(),
+                            mapping["repeat"].as_u64().unwrap_or(1).clamp(1, 8) as usize,
+                        ));
                     }
                 }
             }
@@ -539,10 +559,13 @@ impl Host {
             if owner == "host.user" && cue.starts_with("clip:") {
                 let clip = &cue[5..];
                 if model["clips"][clip].is_object() {
-                    plan["clips"] = json!([clip]);
-                    channels.push("animation".into());
+                    clips.push(clip.to_owned());
                 }
             }
+        }
+        if !clips.is_empty() {
+            plan["clips"] = json!(clips);
+            channels.push("animation".into());
         }
         Ok((plan, channels))
     }
@@ -627,6 +650,7 @@ impl Host {
         }
         if self.renderer_ready {
             self.scheduler.tick(now);
+            self.prepare_variant_start();
         }
     }
     fn snapshot(&self) -> Value {
@@ -1059,7 +1083,7 @@ fn presentation_ack(
     let mut h = state.lock().unwrap();
     let now = h.now();
     let accepted = match event.as_str() {
-        "started" => h.generation_start_valid(id) && h.scheduler.started(id, generation, now),
+        "started" => h.start_presentation(id, generation, now),
         "completed" => h.scheduler.channel(id, generation, &channel, false, now),
         "failed" => h.scheduler.channel(id, generation, &channel, true, now),
         "valid" => h.scheduler.valid(id, generation),

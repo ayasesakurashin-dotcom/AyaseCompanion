@@ -159,6 +159,42 @@ fn generated_failure_uses_only_explicit_fallback() {
     finish(&mut h);
 }
 #[test]
+fn explicit_fallback_sequences_keep_one_task_and_alternate_at_actual_start() {
+    let (_root, _server, mut h) = fixture();
+    let response = json!({"mode":"generated-with-fallback","intent":"[fail]","fallback":[{"id":"one","text":["one-first","one-second"]},{"id":"two","text":["two-first","two-second"]}]});
+    let mut previous = Value::Null;
+    for _ in 0..4 {
+        let id = h
+            .generate(
+                response.clone(),
+                "test.sequence",
+                Priority::Normal,
+                true,
+                60000,
+                0,
+                None,
+            )
+            .unwrap();
+        wait(&mut h, |h| h.scheduler.active().is_some_and(|t| t.id == id));
+        let task = h.scheduler.active().unwrap().clone();
+        assert_ne!(task.plan["fixedChoice"]["id"], previous);
+        assert_eq!(task.plan["textSegments"].as_array().unwrap().len(), 2);
+        assert_ne!(task.plan["stream"], true);
+        assert!(h.start_presentation(id, task.generation, h.now()));
+        previous = task.plan["fixedChoice"]["id"].clone();
+        // Late worker completion must not overwrite the selected fixed sequence.
+        wait(&mut h, |h| h.ai.jobs.get(&id).is_some_and(|j| j.finished));
+        assert_eq!(
+            h.scheduler.active().unwrap().plan["textSegments"],
+            task.plan["textSegments"]
+        );
+        assert!(h
+            .scheduler
+            .channel(id, task.generation, "text", false, h.now()));
+        wait(&mut h, |h| !h.ai.jobs.contains_key(&id));
+    }
+}
+#[test]
 fn stop_also_revokes_a_generated_tasks_prepared_fixed_fallback() {
     let (_root, _server, mut h) = fixture();
     let high = h
@@ -494,7 +530,16 @@ fn char_budget_and_upstream_length_are_diagnosed_without_speaking_a_different_bo
             .filter(|r| r["path"].as_str().unwrap().contains("/tts "))
             .map(|r| r["body"]["text"].as_str().unwrap())
             .collect::<String>();
-        assert_eq!(speech, crate::speech_text::spoken(text));
+        assert_eq!(
+            speech,
+            crate::speech_text::spoken(text),
+            "notice: {}; paths: {:?}",
+            h.ai.notice,
+            requests
+                .iter()
+                .map(|r| r["path"].clone())
+                .collect::<Vec<_>>()
+        );
         assert!(h
             .scheduler
             .log

@@ -603,16 +603,25 @@ impl Host {
                     if job.spec.response["mode"] == "generated-with-fallback" {
                         let response =
                             json!({"mode":"fixed","variants":job.spec.response["fallback"]});
-                        let random = (Uuid::new_v4().as_u128() >> 64) as f64 / u64::MAX as f64;
-                        if let Some(variant) = plugin::choose_variant(&response, random) {
-                            if let Ok((plan, channels)) =
-                                self.resolve_variant(&variant, &job.spec.source)
-                            {
-                                self.scheduler
-                                    .ready(id, job.spec.generation, plan, channels, now);
-                                self.ai.notice =
-                                    "生成未就绪，已使用这份配置明确指定的固定后备".into();
+                        if let Ok((mut plan, channels)) = self.variant_plan(
+                            &response,
+                            &job.spec.source,
+                            "fallback",
+                            super::variants::random_unit(),
+                        ) {
+                            if let Some(task) = self.scheduler.tasks.iter().find(|t| t.id == id) {
+                                plan["evidence"] = task.plan["evidence"].clone();
                             }
+                            self.scheduler
+                                .ready(id, job.spec.generation, plan, channels, now);
+                            self.ai.notice = "生成未就绪，已使用这份配置明确指定的固定后备".into();
+                        } else {
+                            self.scheduler.finish(
+                                id,
+                                Status::Failed,
+                                "固定后备没有可呈现素材",
+                                now,
+                            );
                         }
                     } else {
                         self.scheduler

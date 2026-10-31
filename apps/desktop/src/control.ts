@@ -61,7 +61,8 @@ export function setupControl(root:HTMLElement){
     const container=$('#schema-form');container.replaceChildren();if(!editing)return;
     function field(schema:Json,current:any,key:string,onChange:(v:any)=>void,parent:HTMLElement){
       const nullable=!!schema.anyOf?.some((s:Json)=>s.type==='null');
-      if(nullable)schema={...schema,...schema.anyOf.find((s:Json)=>s.type!=='null')};
+      const alternatives=schema.anyOf?.filter((s:Json)=>s.type!=='null');
+      if(alternatives)schema={...schema,...(alternatives.find((s:Json)=>s.type===(Array.isArray(current)?'array':'string'))??alternatives[0])};
       const wrap=document.createElement('div');wrap.className='field';parent.append(wrap);
       const title=document.createElement('label');title.textContent=schema.title??key;wrap.append(title);
       if(schema.type==='object'&&schema.properties){
@@ -72,14 +73,15 @@ export function setupControl(root:HTMLElement){
         const arr=Array.isArray(current)?structuredClone(current):[];const list=document.createElement('div');wrap.append(list);
         arr.forEach((entry,index)=>{const item=document.createElement('div');item.className='array-item';list.append(item);field(schema.items,entry,`条目 ${index+1}`,v=>{arr[index]=v;onChange(arr);},item);
           const remove=document.createElement('button');remove.type='button';remove.textContent='删除此项';item.append(remove);remove.onclick=()=>{arr.splice(index,1);onChange(arr);form();};});
-        const add=document.createElement('button');add.type='button';add.textContent='添加条目';wrap.append(add);add.onclick=()=>{const item=defaults(schema.items);if(item&&typeof item==='object'&&!Array.isArray(item)&&schema.items.properties?.id)item.id=id();arr.push(item);onChange(arr);form();};
+        const add=document.createElement('button');add.type='button';add.textContent='添加条目';add.disabled=arr.length>=schema.maxItems;wrap.append(add);add.onclick=()=>{const item=defaults(schema.items);if(item&&typeof item==='object'&&!Array.isArray(item)&&schema.items.properties?.id)item.id=id();arr.push(item);onChange(arr);form();};
       }else if(schema.enum){const select=document.createElement('select');schema.enum.forEach((v:any)=>{const o=document.createElement('option');o.value=String(v);o.textContent=String(v);select.append(o);});select.value=String(current);select.onchange=()=>onChange(select.value);wrap.append(select);
       }else if(schema.type==='boolean'){const input=document.createElement('input');input.type='checkbox';input.checked=Boolean(current);input.onchange=()=>onChange(input.checked);wrap.append(input);
       }else if(schema.type==='object'||Array.isArray(current)){const input=document.createElement('textarea');input.value=JSON.stringify(current,null,2);input.rows=5;input.onchange=()=>{try{onChange(JSON.parse(input.value));input.setCustomValidity('');}catch{input.setCustomValidity('请输入有效 JSON');}};wrap.append(input);
-      }else{const input=document.createElement(schema.type==='string'&&(key==='text'||key==='intent')?'textarea':'input') as HTMLInputElement|HTMLTextAreaElement;
+      }else{const input=document.createElement(schema.type==='string'&&(key==='text'||key==='intent'||schema.maxLength>=2000||['audioAsset','textAsset','cue'].includes(key))?'textarea':'input') as HTMLInputElement|HTMLTextAreaElement;
         if(input instanceof HTMLInputElement){input.type=schema.type==='number'||schema.type==='integer'?'number':schema.pattern?.includes('[0-5]')?'time':'text';if(schema.minimum!==undefined)input.min=String(schema.minimum);if(schema.maximum!==undefined)input.max=String(schema.maximum);}
         input.value=String(current??'');input.disabled=schema.const!==undefined;
         input.oninput=()=>onChange(nullable&&input.value===''?null:schema.type==='number'||schema.type==='integer'?Number(input.value):input.value);wrap.append(input);
+        if(key==='text'&&alternatives?.some((s:Json)=>s.type==='array')){const multi=document.createElement('button');multi.type='button';multi.textContent='改为多段文字';wrap.append(multi);multi.onclick=()=>{onChange(input.value?[input.value]:[]);form();};}
       }
       if(schema.description){const hint=document.createElement('small');hint.textContent=schema.description;wrap.append(hint);}
     }

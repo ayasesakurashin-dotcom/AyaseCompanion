@@ -131,6 +131,8 @@
                   "maximum": 10000
                 },
                 "text": {
+                  "title": "固定文字（支持多段）",
+                  "description": "每个列表条目独立分页和阅读；标点与换行保留。整组属于同一任务。",
                   "anyOf": [
                     {
                       "type": "null"
@@ -138,36 +140,77 @@
                     {
                       "type": "string",
                       "maxLength": 12000
+                    },
+                    {
+                      "type": "array",
+                      "maxItems": 32,
+                      "items": {
+                        "type": "string",
+                        "maxLength": 12000
+                      }
                     }
                   ]
                 },
                 "textAsset": {
+                  "title": "文字素材编号",
+                  "description": "按顺序播放，编号可用逗号或换行分隔，也可使用 JSON 数组；最多32条。",
                   "anyOf": [
                     {
                       "type": "null"
                     },
                     {
-                      "type": "string"
+                      "type": "string",
+                      "maxLength": 8192
+                    },
+                    {
+                      "type": "array",
+                      "maxItems": 32,
+                      "items": {
+                        "type": "string",
+                        "maxLength": 128
+                      }
                     }
                   ]
                 },
                 "audioAsset": {
+                  "title": "音声素材编号",
+                  "description": "按顺序播放，编号可用逗号或换行分隔，也可使用 JSON 数组；最多32条。",
                   "anyOf": [
                     {
                       "type": "null"
                     },
                     {
-                      "type": "string"
+                      "type": "string",
+                      "maxLength": 8192
+                    },
+                    {
+                      "type": "array",
+                      "maxItems": 32,
+                      "items": {
+                        "type": "string",
+                        "maxLength": 128
+                      }
                     }
                   ]
                 },
                 "cue": {
+                  "title": "语义动作编号",
+                  "description": "按顺序播放，编号可用逗号或换行分隔，也可使用 JSON 数组；最多32条。",
                   "anyOf": [
                     {
                       "type": "null"
                     },
                     {
-                      "type": "string"
+                      "type": "string",
+                      "maxLength": 8192
+                    },
+                    {
+                      "type": "array",
+                      "maxItems": 32,
+                      "items": {
+                        "type": "string",
+                        "maxLength": 128
+                      }
                     }
                   ]
                 },
@@ -207,6 +250,8 @@
                   "maximum": 10000
                 },
                 "text": {
+                  "title": "固定文字（支持多段）",
+                  "description": "每个列表条目独立分页和阅读；标点与换行保留。整组属于同一任务。",
                   "anyOf": [
                     {
                       "type": "null"
@@ -214,36 +259,77 @@
                     {
                       "type": "string",
                       "maxLength": 12000
+                    },
+                    {
+                      "type": "array",
+                      "maxItems": 32,
+                      "items": {
+                        "type": "string",
+                        "maxLength": 12000
+                      }
                     }
                   ]
                 },
                 "textAsset": {
+                  "title": "文字素材编号",
+                  "description": "按顺序播放，编号可用逗号或换行分隔，也可使用 JSON 数组；最多32条。",
                   "anyOf": [
                     {
                       "type": "null"
                     },
                     {
-                      "type": "string"
+                      "type": "string",
+                      "maxLength": 8192
+                    },
+                    {
+                      "type": "array",
+                      "maxItems": 32,
+                      "items": {
+                        "type": "string",
+                        "maxLength": 128
+                      }
                     }
                   ]
                 },
                 "audioAsset": {
+                  "title": "音声素材编号",
+                  "description": "按顺序播放，编号可用逗号或换行分隔，也可使用 JSON 数组；最多32条。",
                   "anyOf": [
                     {
                       "type": "null"
                     },
                     {
-                      "type": "string"
+                      "type": "string",
+                      "maxLength": 8192
+                    },
+                    {
+                      "type": "array",
+                      "maxItems": 32,
+                      "items": {
+                        "type": "string",
+                        "maxLength": 128
+                      }
                     }
                   ]
                 },
                 "cue": {
+                  "title": "语义动作编号",
+                  "description": "按顺序播放，编号可用逗号或换行分隔，也可使用 JSON 数组；最多32条。",
                   "anyOf": [
                     {
                       "type": "null"
                     },
                     {
-                      "type": "string"
+                      "type": "string",
+                      "maxLength": 8192
+                    },
+                    {
+                      "type": "array",
+                      "maxItems": 32,
+                      "items": {
+                        "type": "string",
+                        "maxLength": 128
+                      }
                     }
                   ]
                 },

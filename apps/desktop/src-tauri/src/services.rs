@@ -305,7 +305,7 @@ pub fn request(
 }
 fn checked(r: Result<Response, reqwest::Error>) -> Result<Response, String> {
     let r = r.map_err(|e| {
-        #[cfg(feature = "smoke-test")]
+        #[cfg(any(test, feature = "smoke-test"))]
         if e.url().is_some_and(|u| u.host_str() == Some("127.0.0.1")) {
             eprintln!("isolated loopback transport: {e:?}");
         }

@@ -346,6 +346,79 @@ pub(super) fn start(app: tauri::AppHandle, state: Shared) {
                 }
                 evidence.push(json!({"case":"interrupted stream closes and records only shown text","passed":true,"channels":task.channels}));
             }
+            // One fixed task owns all text materials, ordered recordings and cues.
+            let settings = state.lock().unwrap().ai.settings.clone();
+            let bytes =
+                services::speech(&settings, "", "synthetic fixed recording", "fixture-voice")?;
+            let sequence = {
+                let mut h = state.lock().unwrap();
+                let package = h.package.as_ref().unwrap();
+                let path = h
+                    .root
+                    .join("packages")
+                    .join(&package.report.hash)
+                    .join("content/smoke-sequence.wav");
+                fs::write(&path, &bytes).map_err(|e| e.to_string())?;
+                let package = h.package.as_mut().unwrap();
+                package.files.insert("smoke-sequence.wav".into(), bytes);
+                package.manifest["assets"]["smoke.recording"] =
+                    json!({"kind":"audio","path":"smoke-sequence.wav","durationMs":1000});
+                allow_assets(&app, &h);
+                h.present_variants(json!({"mode":"fixed","variants":[{"id":"sequence","text":["第一段。","Second material.","最后一段。"],"audioAsset":"smoke.recording,smoke.recording\nsmoke.recording","cue":["greeting","greeting"],"readMs":1000}]}),"smoke.fixed-sequence",Priority::Normal,false,120000,0)?
+            };
+            wait(&state, 10, |h| {
+                h.scheduler
+                    .active()
+                    .is_some_and(|t| t.id == sequence && t.status == Status::Presenting)
+            })?;
+            let high = {
+                let mut h = state.lock().unwrap();
+                h.present(
+                    json!({"id":"after-sequence","text":"next","readMs":1000}),
+                    "smoke.after-sequence",
+                    Priority::Important,
+                    false,
+                    120000,
+                    0,
+                )?
+            };
+            wait(&state, 45, |h| task_done(h, sequence) && task_done(h, high))?;
+            {
+                let h = state.lock().unwrap();
+                let task = h.scheduler.tasks.iter().find(|t| t.id == sequence).unwrap();
+                let acks = task.plan["audioAcks"]
+                    .as_array()
+                    .ok_or("多固定录音缺少真实回执")?;
+                if task.status != Status::Completed
+                    || task.channels.len() != 3
+                    || acks.len() != 3
+                    || acks.iter().any(|v| v["result"] != "completed")
+                    || acks.windows(2).any(|p| {
+                        p[1]["startedAt"].as_u64().unwrap_or(0)
+                            < p[0]["endedAt"].as_u64().unwrap_or(u64::MAX)
+                    })
+                {
+                    return Err("固定素材序列的通道或片段顺序异常".into());
+                }
+                let finish = h
+                    .scheduler
+                    .log
+                    .iter()
+                    .find(|v| v["event"] == "finished" && v["detail"]["taskId"] == sequence)
+                    .and_then(|v| v["atMs"].as_u64())
+                    .ok_or("序列未结束")?;
+                let next = h
+                    .scheduler
+                    .log
+                    .iter()
+                    .find(|v| v["event"] == "started" && v["detail"]["taskId"] == high)
+                    .and_then(|v| v["atMs"].as_u64())
+                    .ok_or("后续任务未开始")?;
+                if next < finish {
+                    return Err("多素材任务被后续任务抢占".into());
+                }
+                evidence.push(json!({"case":"fixed multi-material sequence shares text audio animation ownership; later important waits","passed":true,"channels":task.channels,"textSegments":task.plan["textSegments"],"clips":task.plan["clips"],"audioAcks":acks,"nextWaited":true}));
+            }
             let hit_regions = crate::host::hit_testing::diagnostics(&app);
             if hit_regions["regionCount"].as_u64().unwrap_or(0) < 2
                 || hit_regions["updatedRecently"] != true
