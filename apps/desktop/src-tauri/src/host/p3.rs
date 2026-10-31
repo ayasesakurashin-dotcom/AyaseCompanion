@@ -692,6 +692,7 @@ pub(super) async fn capability_probe(
     provider: services::Provider,
     key: String,
     clear_key: bool,
+    thinking: Option<services::thinking::Thinking>,
 ) -> Result<String, String> {
     control(&window)?;
     if !["vision", "search"].contains(&kind.as_str()) {
@@ -716,7 +717,7 @@ pub(super) async fn capability_probe(
             .vault
             .key(&kind, &provider.endpoint)?
     };
-    tauri::async_runtime::spawn_blocking(move||{let c=services::client(20)?;let request=services::request(&c,&provider,&key,if kind=="vision"{"chat/completions"}else{"tools/search"})?;let body=if kind=="vision"{json!({"model":provider.model,"messages":[{"role":"user","content":"连接测试，请只回复 OK。"}],"stream":false,"max_tokens":32})}else{json!({"query":"Open-Meteo documentation","count":1,"need_content":false})};let v=services::json_response(request.json(&body).send())?;if kind=="vision"&&!v["choices"].is_array()||kind=="search"&&!v["results"].is_array(){return Err("服务可连接，但响应协议不匹配".into());}Ok("连接与基本协议正常；视觉图像理解仍需实机观察验证。".into())}).await.map_err(|_|"连接测试未完成")?
+    tauri::async_runtime::spawn_blocking(move||{let c=services::client(20)?;let request=services::request(&c,&provider,&key,if kind=="vision"{"chat/completions"}else{"tools/search"})?;let mut body=if kind=="vision"{json!({"model":provider.model,"messages":[{"role":"user","content":"连接测试，请只回复 OK。"}],"stream":false,"max_tokens":32})}else{json!({"query":"Open-Meteo documentation","count":1,"need_content":false})};if kind=="vision"{thinking.unwrap_or_default().apply(&provider,&mut body)?;}let v=services::json_response(request.json(&body).send())?;if kind=="vision"&&!v["choices"].is_array()||kind=="search"&&!v["results"].is_array(){return Err("服务可连接，但响应协议不匹配".into());}Ok("连接与基本协议正常；视觉图像理解仍需实机观察验证。".into())}).await.map_err(|_|"连接测试未完成")?
 }
 #[tauri::command]
 pub(super) fn local_sample_action(

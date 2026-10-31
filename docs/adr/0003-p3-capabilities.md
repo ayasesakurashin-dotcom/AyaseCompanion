@@ -24,3 +24,8 @@
 接口核对：2026-10-29，[DeepSeek Search](https://api-docs.deepseek.com/api/search/)、[Open-Meteo](https://open-meteo.com/en/docs)、[香港天文台公农历对照](https://www.hko.gov.hk/en/gts/time/conversion.htm)。接口核对不代表真实账号验收通过。
 
 位置接口核对：2026-10-30，[Microsoft Geolocator](https://learn.microsoft.com/en-us/uwp/api/windows.devices.geolocation.geolocator.getgeopositionasync)、[Windows 位置隐私](https://support.microsoft.com/en-us/windows/privacy/windows-location-service-and-privacy)。真实设备权限、精度和定位成功率由人工验收。
+
+
+P3复验修订（2026-10-31）：工作相关数值支持至少12小时；模型按每个实际帧缓存alpha外接范围，由宿主Windows鼠标穿透控制排除透明排版空间，气泡布局与交互命中分离。命中上报绑定当前伙伴/包且有短有效期；不把已开始呈现的内容改成可抢占。
+
+聊天和独立视觉分别配置思考接口/强度，默认关闭；未知型号不猜扩展参数，固定思考型号不能伪装成关闭。翻译复用聊天模型，使用当前人格/称呼且独立请求关闭思考；在分段前及译后仅去除明确舞台注释，保留普通括号信息。字数预算在完整候选上按句收尾，无句界则明确省略；原先的逐字符硬截断不再直接作为最终正文。诊断记录结束原因与裁剪元数据，文字和TTS使用同一最终正文。

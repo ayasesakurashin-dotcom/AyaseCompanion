@@ -311,10 +311,10 @@
       },
       "activeWithinSeconds": {
         "type": "integer",
-        "title": "设备活跃判定（秒）",
+        "title": "设备活跃判定（秒，支持12小时及以上）",
         "default": 60,
         "minimum": 1,
-        "maximum": 600
+        "maximum": 86400
       }
     }
   },

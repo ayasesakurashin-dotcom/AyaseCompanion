@@ -13,6 +13,7 @@ use std::{
     },
     time::Duration,
 };
+pub mod thinking;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -33,6 +34,7 @@ impl Default for Provider {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
+    pub chat_thinking: thinking::Thinking,
     pub p3: crate::p3::Settings,
     pub chat: Provider,
     pub voice: Provider,
@@ -44,6 +46,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            chat_thinking: thinking::Thinking::default(),
             p3: crate::p3::Settings::default(),
             chat: Provider::default(),
             voice: Provider {
@@ -75,6 +78,7 @@ pub fn endpoint(value: &str) -> Result<reqwest::Url, String> {
 }
 impl Settings {
     pub fn validate(&self) -> Result<(), String> {
+        self.chat_thinking.validate()?;
         self.p3.validate()?;
         for p in [&self.chat, &self.voice, &self.memory] {
             if !p.endpoint.is_empty() {
@@ -368,18 +372,30 @@ impl BodyFilter {
             .collect()
     }
 }
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatEnd {
+    pub finish_reason: String,
+    pub output_chars: usize,
+}
 pub fn chat(
     s: &Settings,
     key: &str,
     messages: Vec<Value>,
     cancel: &AtomicBool,
     mut emit: impl FnMut(String) -> Result<(), String>,
-) -> Result<(), String> {
+) -> Result<ChatEnd, String> {
     if !s.chat.enabled {
         return Err("聊天服务尚未启用".into());
     }
     let c = client(s.timeout_seconds)?;
-    let response=checked(request(&c,&s.chat,key,"chat/completions")?.json(&json!({"model":s.chat.model,"messages":messages,"stream":true,"max_tokens":(s.max_chars*2).max(64)})).send())?;
+    let mut body = json!({"model":s.chat.model,"messages":messages,"stream":true,"max_tokens":(s.max_chars*2).max(64)});
+    s.chat_thinking.apply(&s.chat, &mut body)?;
+    let response = checked(
+        request(&c, &s.chat, key, "chat/completions")?
+            .json(&body)
+            .send(),
+    )?;
     let is_json = response
         .headers()
         .get("content-type")
@@ -411,12 +427,19 @@ pub fn chat(
                 .ok_or("聊天响应没有正文")?,
             true,
         )?;
-        return Ok(());
+        return Ok(ChatEnd {
+            finish_reason: v["choices"][0]["finish_reason"]
+                .as_str()
+                .unwrap_or("unknown")
+                .into(),
+            output_chars: count.get(),
+        });
     }
     let mut reader = BufReader::new(response);
     let mut event = String::new();
     let mut line = String::new();
     let mut ended = false;
+    let mut finish_reason = String::new();
     loop {
         line.clear();
         let n = reader
@@ -443,8 +466,9 @@ pub fn chat(
                 if let Some(content) = v["choices"][0]["delta"]["content"].as_str() {
                     output(content, false)?;
                 }
-                if v["choices"][0]["finish_reason"].as_str().is_some() {
+                if let Some(reason) = v["choices"][0]["finish_reason"].as_str() {
                     ended = true;
+                    finish_reason = reason.into();
                 }
                 event.clear();
             }
@@ -459,6 +483,7 @@ pub fn chat(
         }
         if count.get() >= s.max_chars {
             ended = true;
+            finish_reason = "client_limit".into();
             break;
         }
         if cancel.load(Ordering::Relaxed) {
@@ -469,7 +494,14 @@ pub fn chat(
     if !ended {
         return Err("聊天流意外断开".into());
     }
-    Ok(())
+    Ok(ChatEnd {
+        finish_reason: if finish_reason.is_empty() {
+            "done".into()
+        } else {
+            finish_reason
+        },
+        output_chars: count.get(),
+    })
 }
 pub fn speech(s: &Settings, key: &str, text: &str, voice: &str) -> Result<Vec<u8>, String> {
     if !s.voice.enabled {

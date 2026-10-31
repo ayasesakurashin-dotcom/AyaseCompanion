@@ -167,7 +167,7 @@ fieldset{border:1px solid var(--line);border-radius:8px;margin:0;padding:10px 14
 
 .hidden{display:none!important}
 .pet-toolbar{position:absolute;bottom:9px;left:50%;transform:translateX(-50%);display:flex;gap:7px;opacity:.25;transition:opacity .15s}
-.pet-shell:hover .pet-toolbar{opacity:1}
+.pet-shell[data-interactive="true"] .pet-toolbar{opacity:1}
 .pet-toolbar button{background:#fffffff2;font-size:12px;padding:5px 10px;border-radius:12px}
 .pet-empty{position:absolute;top:45%;left:15%;right:15%;text-align:center;padding:15px;background:#fbf4faed;border-radius:12px;color:#8d6684}
 .browser-notice{margin:60px auto;max-width:600px;padding:30px;line-height:1.8}

@@ -6,6 +6,7 @@ mod memory;
 mod p3;
 mod readable;
 mod services;
+mod speech_text;
 #[cfg(any(test, feature = "smoke-test"))]
 mod test_http;
 mod voice_api;

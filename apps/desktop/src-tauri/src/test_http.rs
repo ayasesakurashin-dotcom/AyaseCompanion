@@ -168,7 +168,16 @@ fn respond(mut stream: TcpStream, requests: Arc<Mutex<Vec<Value>>>) -> std::io::
             );
         }
         let long = input.contains("[long]");
-        let chunks = if input.contains("[markdown]") {
+        let chunks = if body["messages"][0]["content"]
+            .as_str()
+            .is_some_and(|s| s.contains("配音翻译"))
+        {
+            vec!["Meow (smiles), see you (Sunday)."]
+        } else if input.contains("[speech-style]") {
+            vec!["喵（过来蹭了一下）。明天（周日）见。"]
+        } else if input.contains("[length]") {
+            vec!["这是上游长度限制导致的未完成片段"]
+        } else if input.contains("[markdown]") {
             vec!["# 合成测试摘要\n\n第一句是**正常正文**，含 emoji 🙂。\n\n1. 第一项内容。\n2. 第二项内容。"]
         } else if input.contains("[tail-slow]") {
             vec![
@@ -198,7 +207,7 @@ fn respond(mut stream: TcpStream, requests: Arc<Mutex<Vec<Value>>>) -> std::io::
             }
         }
         if !input.contains("[cut]") {
-            data.push_str("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n");
+            data.push_str(&format!("data: {}\n\ndata: [DONE]\n\n",json!({"choices":[{"delta":{},"finish_reason":if input.contains("[length]"){"length"}else{"stop"}}]})));
         }
         write!(
             stream,

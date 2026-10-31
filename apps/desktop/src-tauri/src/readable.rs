@@ -76,9 +76,82 @@ pub fn plain(source: &str) -> String {
         .collect()
 }
 
+/// A hard character budget must not silently leave a half-sentence at the end.
+pub fn bounded_reply(text: &str, max: usize, incomplete: bool) -> String {
+    if text.trim().is_empty() {
+        return String::new();
+    }
+    let all = text.chars().collect::<Vec<_>>();
+    if all.len() <= max && !incomplete {
+        return text.to_owned();
+    }
+    let prefix = all.iter().take(max).collect::<String>();
+    let mut end = None;
+    let mut depth = 0i32;
+    for (i, c) in prefix.char_indices() {
+        if "（([【".contains(c) {
+            depth += 1;
+        } else if "）)]】".contains(c) {
+            depth = (depth - 1).max(0);
+        }
+        if depth == 0 && "。！？!?；;\n".contains(c) {
+            end = Some(i + c.len_utf8());
+        }
+        if depth == 0
+            && c == '.'
+            && prefix[i + c.len_utf8()..]
+                .chars()
+                .next()
+                .is_none_or(|c| c.is_whitespace())
+        {
+            end = Some(i + 1);
+        }
+    }
+    if let Some(end) = end {
+        let result = prefix[..end].trim_end();
+        if !result.is_empty() {
+            return result.into();
+        }
+    }
+    if max == 0 {
+        return String::new();
+    }
+    let prefix = all.iter().take(max.saturating_sub(1)).collect::<String>();
+    format!(
+        "{}…",
+        prefix.trim_end_matches([' ', '\n', ',', '，', ':', '：'])
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn reply_limits_keep_a_complete_sentence_or_mark_an_excerpt() {
+        assert_eq!(
+            bounded_reply("先说完。然后是被截断的后半句", 8, false),
+            "先说完。"
+        );
+        assert_eq!(
+            bounded_reply("没有可用完整句子的很长内容", 5, false),
+            "没有可用…"
+        );
+        assert_eq!(
+            bounded_reply("这是一段中断内容", 100, true),
+            "这是一段中断内容…"
+        );
+        assert_eq!(
+            bounded_reply("明天（周日）见。", 100, false),
+            "明天（周日）见。"
+        );
+        assert_eq!(bounded_reply("long content", 1, false), "…");
+        assert_eq!(
+            bounded_reply("第一句（这里有。括号内容）仍未结束", 12, false)
+                .chars()
+                .count(),
+            12
+        );
+    }
     #[test]
     fn headings_lists_emphasis_links_and_blank_lines_become_readable() {
         let text=plain("# 项目摘要\n\n\n\n项目 **已完成**，保留 38% 和 🙂。\n\n1. **第一项**：说明。\n2. [第二项](https://example.org)：补充。\n\n---\n\n结束。");

@@ -11,6 +11,17 @@ fn wall() -> DateTime<Utc> {
         .with_timezone(&Utc)
 }
 #[test]
+fn work_threshold_rest_and_activity_accept_twelve_hours() {
+    let p = crate::plugin::builtin()
+        .remove("ayase.work-reminder")
+        .unwrap();
+    let make = |seconds| {
+        p.configure(&json!({"presetId":"long-work","configVersion":"1.0","enabled":true,"config":{"thresholdSeconds":seconds,"restSeconds":seconds,"activeWithinSeconds":seconds}}),&json!({}),0)
+    };
+    assert!(make(43_200).enabled);
+    assert!(!make(86_401).enabled);
+}
+#[test]
 fn work_counter_distinguishes_manual_pause_idle_rest_and_suspend() {
     let mut c = config("work-reminder");
     c.config["thresholdSeconds"] = json!(3);

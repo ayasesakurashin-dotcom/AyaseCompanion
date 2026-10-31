@@ -623,6 +623,16 @@ impl Host {
                     t.plan["streamDone"] = json!(true);
                 }
             }
+            conversation::Event::Generation(metadata) => {
+                if let Some(t) = self.scheduler.tasks.iter_mut().find(|t| t.id == id) {
+                    t.plan["evidence"]["generation"] = metadata.clone();
+                }
+                self.scheduler.record(
+                    now,
+                    "generation-result",
+                    json!({"taskId":id,"generation":metadata}),
+                );
+            }
             conversation::Event::Audio(index, result) => {
                 if index >= 400 {
                     return;

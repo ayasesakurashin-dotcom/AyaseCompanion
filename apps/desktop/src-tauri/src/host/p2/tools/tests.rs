@@ -120,6 +120,7 @@ fn only_selected_current_package_audio_is_read() {
 fn connection_uses_unsaved_key_without_persisting_it() {
     let (_root, h, _, _) = fixture();
     let mut connection = Connection {
+        thinking: Default::default(),
         provider: services::Provider {
             enabled: false,
             endpoint: "https://example.org/v1".into(),

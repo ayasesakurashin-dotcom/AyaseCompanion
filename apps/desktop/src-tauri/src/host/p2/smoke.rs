@@ -346,6 +346,13 @@ pub(super) fn start(app: tauri::AppHandle, state: Shared) {
                 }
                 evidence.push(json!({"case":"interrupted stream closes and records only shown text","passed":true,"channels":task.channels}));
             }
+            let hit_regions = crate::host::hit_testing::diagnostics(&app);
+            if hit_regions["regionCount"].as_u64().unwrap_or(0) < 2
+                || hit_regions["updatedRecently"] != true
+            {
+                return Err("原生模型/工具栏命中区域未收到有效前端回报".into());
+            }
+            evidence.push(json!({"case":"native model and toolbar input regions received from actual rendered frames","passed":true,"regions":hit_regions,"note":"does not replace manual cross-window pointer/DPI/drag acceptance"}));
             Ok(())
         })();
         let h = state.lock().unwrap();

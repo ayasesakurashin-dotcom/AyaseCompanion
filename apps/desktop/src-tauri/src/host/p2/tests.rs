@@ -424,3 +424,81 @@ fn short_reply_limits_accept_one_and_keep_the_output_bounded() {
     s.max_chars = 0;
     assert!(s.validate().is_err());
 }
+#[test]
+fn translated_speech_keeps_persona_and_asides_but_no_stage_directions_or_reasoning() {
+    let (_root, server, mut h) = fixture();
+    h.ai.settings.chat.model = "deepseek-flash".into();
+    h.ai.settings.chat_thinking.effort = "high".into();
+    let profile = h.instance_mut().unwrap().profile.as_mut().unwrap();
+    profile.read_language = "English".into();
+    profile.user_address = "Captain".into();
+    profile.persona = "A playful cat companion".into();
+    let id = submit(&mut h, "[speech-style]");
+    wait(&mut h, |h| h.ai.jobs.get(&id).is_some_and(|j| j.finished));
+    let task = h.scheduler.tasks.iter().find(|t| t.id == id).unwrap();
+    assert!(task.plan["text"].as_str().unwrap().contains("过来蹭"));
+    let requests = server.requests.lock().unwrap();
+    let main = requests
+        .iter()
+        .find(|r| {
+            r["body"]["messages"]
+                .as_array()
+                .is_some_and(|a| a.last().unwrap()["content"] == "[speech-style]")
+        })
+        .unwrap();
+    assert_eq!(main["body"]["thinking"]["type"], "enabled");
+    let translation = requests
+        .iter()
+        .find(|r| {
+            r["body"]["messages"][0]["content"]
+                .as_str()
+                .is_some_and(|s| s.contains("配音翻译"))
+        })
+        .unwrap();
+    let prompt = translation["body"]["messages"][0]["content"]
+        .as_str()
+        .unwrap();
+    for value in ["Alpha", "Captain", "A playful cat companion"] {
+        assert!(prompt.contains(value));
+    }
+    assert_eq!(translation["body"]["thinking"]["type"], "disabled");
+    assert!(!translation["body"]["messages"][1]["content"]
+        .as_str()
+        .unwrap()
+        .contains("过来蹭"));
+    let tts = requests
+        .iter()
+        .find(|r| r["path"].as_str().unwrap().contains("/tts "))
+        .unwrap();
+    let text = tts["body"]["text"].as_str().unwrap();
+    assert!(!text.contains("smiles"));
+    assert!(text.contains("(Sunday)"));
+    assert!(text.contains("Meow"));
+}
+#[test]
+fn char_budget_and_upstream_length_are_diagnosed_without_speaking_a_different_body() {
+    for (input, cap, reason) in [("[long]", 20, "stop"), ("[length]", 150, "length")] {
+        let (_root, server, mut h) = fixture();
+        h.ai.settings.max_chars = cap;
+        let id = submit(&mut h, input);
+        wait(&mut h, |h| h.ai.jobs.get(&id).is_some_and(|j| j.finished));
+        let t = h.scheduler.tasks.iter().find(|t| t.id == id).unwrap();
+        let text = t.plan["text"].as_str().unwrap();
+        assert!(text.chars().count() <= cap);
+        assert!(text.ends_with(['。', '…']));
+        assert_eq!(t.plan["evidence"]["generation"]["finishReason"], reason);
+        assert_eq!(t.plan["evidence"]["generation"]["trimmed"], true);
+        let requests = server.requests.lock().unwrap();
+        let speech = requests
+            .iter()
+            .filter(|r| r["path"].as_str().unwrap().contains("/tts "))
+            .map(|r| r["body"]["text"].as_str().unwrap())
+            .collect::<String>();
+        assert_eq!(speech, crate::speech_text::spoken(text));
+        assert!(h
+            .scheduler
+            .log
+            .iter()
+            .any(|e| e["event"] == "generation-result" && e["detail"]["taskId"] == id));
+    }
+}

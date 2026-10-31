@@ -19,6 +19,7 @@ use std::{
 };
 use tauri::{Manager, State, WebviewWindow};
 use uuid::Uuid;
+mod hit_testing;
 mod p2;
 mod p3;
 
@@ -688,8 +689,10 @@ fn control(window: &WebviewWindow) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn snapshot(state: State<Shared>) -> Value {
-    state.lock().unwrap().snapshot()
+fn snapshot(state: State<Shared>, regions: State<Arc<hit_testing::Regions>>) -> Value {
+    let mut value = state.lock().unwrap().snapshot();
+    value["petInteractive"] = json!(regions.0.lock().unwrap().hovered);
+    value
 }
 #[tauri::command]
 async fn import_package(
@@ -1384,6 +1387,7 @@ pub fn run() {
             }
             let shared = Arc::new(Mutex::new(h));
             app.manage(shared.clone());
+            hit_testing::start(app.handle());
             let app_handle = app.handle().clone();
             std::thread::spawn(move || loop {
                 shared.lock().unwrap().tick();
@@ -1447,6 +1451,7 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            hit_testing::pet_hit_regions,
             p3::prepare_screen,
             p3::capability_request,
             p3::p3_action,

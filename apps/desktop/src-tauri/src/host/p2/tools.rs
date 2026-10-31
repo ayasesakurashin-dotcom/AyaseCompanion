@@ -29,6 +29,8 @@ impl Tools {
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(in crate::host) struct Connection {
+    #[serde(default)]
+    pub thinking: services::thinking::Thinking,
     pub provider: services::Provider,
     pub voice_kind: String,
     pub timeout_seconds: u64,
@@ -40,6 +42,7 @@ pub(in crate::host) struct Connection {
 impl Connection {
     fn settings(&self, kind: &str) -> Result<services::Settings, String> {
         let mut s = services::Settings::default();
+        s.chat_thinking = self.thinking.clone();
         s.voice_kind = self.voice_kind.clone();
         s.timeout_seconds = self.timeout_seconds;
         let mut p = self.provider.clone();

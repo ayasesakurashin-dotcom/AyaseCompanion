@@ -9,6 +9,19 @@ export interface PetBridge {invoke:typeof invoke;assetUrl:(path:string)=>string;
 export function setupPet(root:HTMLElement,bridge:PetBridge={invoke,assetUrl:convertFileSrc,drag:()=>getCurrentWindow().startDragging()}){
   root.innerHTML='<div class="pet-shell"><div class="bubble hidden" aria-live="off"></div><canvas aria-label="角色模型"></canvas><div class="pet-toolbar"><button data-input title="展开独立输入框">输入</button><button data-stop title="停止当前整条回复">停止</button><button data-settings title="打开控制台">设置</button></div><div class="pet-empty">请在控制台导入并激活角色包</div></div>';
   const canvas=root.querySelector('canvas')!;
+  let regionSendAt=0,regionBusy=false;
+  const regions=async(s:Snapshot)=>{
+    root.querySelector<HTMLElement>('.pet-shell')!.dataset.interactive=String(!!s.petInteractive);
+    if(regionBusy||performance.now()-regionSendAt<100)return;
+    const shell=root.getBoundingClientRect(),box=canvas.getBoundingClientRect(),b=renderer.visibleBounds();
+    const rects:{x:number;y:number;width:number;height:number}[]=[];
+    if(loaded&&s.model&&b.width>0&&b.height>0)rects.push({x:box.x-shell.x+b.x*box.width/logical.width,y:box.y-shell.y+b.y*box.height/logical.height,width:b.width*box.width/logical.width,height:b.height*box.height/logical.height});
+    const toolbar=root.querySelector<HTMLElement>('.pet-toolbar')!.getBoundingClientRect();
+    rects.push({x:toolbar.x-shell.x,y:toolbar.y-shell.y,width:toolbar.width,height:toolbar.height});
+    if(!s.instance){const empty=root.querySelector<HTMLElement>('.pet-empty')!.getBoundingClientRect();if(empty.width>0&&empty.height>0)rects.push({x:empty.x-shell.x,y:empty.y-shell.y,width:empty.width,height:empty.height});}
+    regionBusy=true;regionSendAt=performance.now();
+    try{await bridge.invoke('pet_hit_regions',{instanceId:s.instance?.id??null,packageHash:s.instance?.packageHash??s.package?.hash??null,rects});}catch{/* A changed instance or a development preview cannot own native input. */}finally{regionBusy=false;}
+  };
   const bubble=new BubblePresenter(root.querySelector<HTMLElement>('.bubble')!);
   const renderer=new SpriteRenderer(canvas);let loaded='',loading=false,current:Task|null=null,epoch=0;
   let baseCurrent:BaseTransition|null=null,baseAckPending=false;
@@ -64,7 +77,7 @@ export function setupPet(root:HTMLElement,bridge:PetBridge={invoke,assetUrl:conv
   let drag=false,pointerStart:{x:number;y:number}|null=null,clickTimer=0,clickOwner='';let hitAreas:{id:string;x:number;y:number;width:number;height:number}[]=[];let logical={width:1,height:1};
   canvas.addEventListener('pointerdown',e=>{if(e.button!==0)return;pointerStart={x:e.clientX,y:e.clientY};});
   canvas.addEventListener('pointermove',e=>{if(!pointerStart||drag)return;if(Math.hypot(e.clientX-pointerStart.x,e.clientY-pointerStart.y)>6){pointerStart=null;drag=true;clearTimeout(clickTimer);void bridge.drag().finally(()=>{drag=false;});}});
-  canvas.addEventListener('pointerup',e=>{if(!pointerStart||drag)return;pointerStart=null;const box=canvas.getBoundingClientRect(),x=(e.clientX-box.x)/box.width*logical.width,y=(e.clientY-box.y)/box.height*logical.height,bounds=renderer.referenceBounds();if(x<bounds.x||y<bounds.y||x>bounds.x+bounds.width||y>bounds.y+bounds.height)return;const area=hitAreas.find(a=>x/logical.width>=a.x&&y/logical.height>=a.y&&x/logical.width<a.x+a.width&&y/logical.height<a.y+a.height)?.id??'';const owner=clickOwner;if(!owner)return;if(clickTimer){clearTimeout(clickTimer);clickTimer=0;void bridge.invoke('pointer_event',{instanceId:owner,click:'double',area});}else clickTimer=window.setTimeout(()=>{clickTimer=0;if(owner===clickOwner)void bridge.invoke('pointer_event',{instanceId:owner,click:'single',area});},250);});
+  canvas.addEventListener('pointerup',e=>{if(!pointerStart||drag)return;pointerStart=null;const box=canvas.getBoundingClientRect(),x=(e.clientX-box.x)/box.width*logical.width,y=(e.clientY-box.y)/box.height*logical.height,bounds=renderer.visibleBounds();if(x<bounds.x||y<bounds.y||x>bounds.x+bounds.width||y>bounds.y+bounds.height)return;const area=hitAreas.find(a=>x/logical.width>=a.x&&y/logical.height>=a.y&&x/logical.width<a.x+a.width&&y/logical.height<a.y+a.height)?.id??'';const owner=clickOwner;if(!owner)return;if(clickTimer){clearTimeout(clickTimer);clickTimer=0;void bridge.invoke('pointer_event',{instanceId:owner,click:'double',area});}else clickTimer=window.setTimeout(()=>{clickTimer=0;if(owner===clickOwner)void bridge.invoke('pointer_event',{instanceId:owner,click:'single',area});},250);});
   canvas.addEventListener('pointercancel',()=>{pointerStart=null;});
   root.querySelector('[data-input]')!.addEventListener('click',()=>void bridge.invoke('show_window',{label:'input'}));
   root.querySelector('[data-settings]')!.addEventListener('click',()=>void bridge.invoke('show_window',{label:'control'}));
@@ -74,12 +87,12 @@ export function setupPet(root:HTMLElement,bridge:PetBridge={invoke,assetUrl:conv
     if(clickOwner!==(s.instance?.id??'')){clearTimeout(clickTimer);clickTimer=0;clickOwner=s.instance?.id??'';}
     const key=s.instance&&s.package?`${s.instance.id}:${s.package.hash}`:'';
     (root.querySelector('.pet-empty') as HTMLElement).hidden=!!key;
-    if(!key){if(loaded){clear();renderer.dispose();loaded='';}return;}
+    if(!key){if(loaded){clear();renderer.dispose();loaded='';}void regions(s);return;}
     const width=360*s.zoom,height=280*s.zoom;canvas.style.width=`${width}px`;canvas.style.height=`${height}px`;
     if(key!==loaded){if(loading)return;loading=true;clear();
       try{await renderer.load(s.model!,Object.fromEntries(Object.entries(s.assetPaths).map(([id,path])=>[id,bridge.assetUrl(path)])));loaded=key;await bridge.invoke('renderer_ready',{instanceId:s.instance!.id,packageHash:s.package!.hash});}
       catch(e){(root.querySelector('.pet-empty') as HTMLElement).hidden=false;root.querySelector('.pet-empty')!.textContent=String(e);}
-      finally{loading=false;}return;
+      finally{loading=false;}void regions(s);return;
     }
     const reference=renderer.referenceBounds(),box=canvas.getBoundingClientRect(),shell=root.getBoundingClientRect();
     const sx=width/s.model!.logicalSize.width,sy=height/s.model!.logicalSize.height;
@@ -95,6 +108,7 @@ export function setupPet(root:HTMLElement,bridge:PetBridge={invoke,assetUrl:conv
     if(current&&active){current=active;if(active.plan.stream){bubble.append(active.plan.text??'',!!active.plan.streamDone);streamAudio(active);}}
     if(active&&!current&&!ackPending&&!loading&&!baseCurrent)await start(active);
     if(base&&!baseCurrent&&!baseAckPending&&!loading)await startBase(base);
+    void regions(s);
     // dragging and input visibility never cancel a presentation.
     void drag;
   }

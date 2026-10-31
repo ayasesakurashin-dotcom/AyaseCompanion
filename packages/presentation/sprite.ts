@@ -6,6 +6,8 @@ export class SpriteRenderer {
   private epoch=0;private raf=0;private model:Model|null=null;
   private base='idle';private baseStart=0;
   private finite:{clips:string[];repeat:number;start:number;done:()=>void;finished:boolean;holdEnd:boolean}|null=null;
+  private visible:Bounds={x:0,y:0,width:0,height:0};
+  private boundsCache=new Map<Clip,Map<number,Bounds>>();
   private reference:Bounds={x:0,y:0,width:360,height:280};
   constructor(private canvas:HTMLCanvasElement){}
   async load(model:Model,paths:Record<string,string>){
@@ -18,7 +20,7 @@ export class SpriteRenderer {
     }));
     if(epoch!==this.epoch)return;
     const idle=model.clips[model.baseModes.idle.loop];if(!idle||!this.images.has(idle.asset))throw new Error('待机图片无法显示');
-    this.reference=this.measureReference(idle);
+    this.reference=this.measureReference(idle);this.visible=this.reference;
     this.baseStart=performance.now();this.loop();
   }
   applyBase(mode:string){if(this.base!==mode){this.base=mode;this.baseStart=performance.now();}}
@@ -27,20 +29,22 @@ export class SpriteRenderer {
     this.finite={clips,repeat,start:performance.now(),done,finished:false,holdEnd};
   }
   referenceBounds(){return this.reference;}
-  private measureReference(clip:Clip):Bounds {
+  visibleBounds(){return this.visible;}
+  private measureReference(clip:Clip,frame=0):Bounds {
     const model=this.model!,image=this.images.get(clip.asset)!;
+    const cached=this.boundsCache.get(clip)?.get(frame);if(cached)return cached;
     const sample=document.createElement('canvas');
     const scale=Math.min(1,512/model.logicalSize.width,512/model.logicalSize.height);
     sample.width=Math.ceil(model.logicalSize.width*scale);sample.height=Math.ceil(model.logicalSize.height*scale);
     const ctx=sample.getContext('2d',{willReadFrequently:true})!;
     const l=clip.layout;
-    const r=l.type==='single'?{x:0,y:0,width:image.width,height:image.height}:l.type==='rects'?l.frames![0]:{x:0,y:0,width:l.cellWidth!,height:l.cellHeight!};
+    const r=l.type==='single'?{x:0,y:0,width:image.width,height:image.height}:l.type==='rects'?l.frames![frame]:{x:(frame%l.columns!)*l.cellWidth!,y:Math.floor(frame/l.columns!)*l.cellHeight!,width:l.cellWidth!,height:l.cellHeight!};
     ctx.scale(scale,scale);
     ctx.drawImage(image,r.x,r.y,r.width,r.height,model.logicalSize.width*model.anchors.feet.x-r.width/2+(clip.offset?.x??0),model.logicalSize.height*model.anchors.feet.y-r.height+(clip.offset?.y??0),r.width,r.height);
     const pixels=ctx.getImageData(0,0,sample.width,sample.height).data;
     let left=sample.width,top=sample.height,right=-1,bottom=-1;
     for(let y=0;y<sample.height;y++)for(let x=0;x<sample.width;x++)if(pixels[(y*sample.width+x)*4+3]>16){left=Math.min(left,x);top=Math.min(top,y);right=Math.max(right,x);bottom=Math.max(bottom,y);}
-    return right<left?{x:0,y:0,...model.logicalSize}:{x:left/scale,y:top/scale,width:(right-left+1)/scale,height:(bottom-top+1)/scale};
+    const bounds=right<left?{x:0,y:0,width:0,height:0}:{x:left/scale,y:top/scale,width:(right-left+1)/scale,height:(bottom-top+1)/scale};if(!this.boundsCache.has(clip))this.boundsCache.set(clip,new Map());this.boundsCache.get(clip)!.set(frame,bounds);return bounds;
   }
   cancel(){this.finite=null;this.baseStart=performance.now();}
   private loop=()=>{
@@ -57,7 +61,7 @@ export class SpriteRenderer {
       }
     }else{clip=model.clips[(model.baseModes[this.base]??model.baseModes.idle).loop];if(clip)frame=frameAt(clip,now-this.baseStart,true);}
     this.canvas.dataset.presentation=this.finite?'finite':'base';this.canvas.dataset.base=this.base;
-    if(clip)this.draw(clip,frame);
+    if(clip){this.visible=this.measureReference(clip,frame);this.draw(clip,frame);}
     this.raf=requestAnimationFrame(this.loop);
   };
   private draw(c:Clip,frame:number){
@@ -69,5 +73,5 @@ export class SpriteRenderer {
     const y=model.logicalSize.height*model.anchors.feet.y-r.height+(c.offset?.y??0);
     ctx.drawImage(im,r.x,r.y,r.width,r.height,x,y,r.width,r.height);
   }
-  dispose(){++this.epoch;cancelAnimationFrame(this.raf);this.finite=null;this.images.clear();this.model=null;this.base='idle';}
+  dispose(){++this.epoch;cancelAnimationFrame(this.raf);this.finite=null;this.images.clear();this.boundsCache.clear();this.visible={x:0,y:0,width:0,height:0};this.model=null;this.base='idle';}
 }
