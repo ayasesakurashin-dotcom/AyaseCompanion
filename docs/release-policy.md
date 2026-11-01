@@ -1,6 +1,6 @@
 # 人工验收与不可变版本
 
-公开仓库：[AyaseCompanion](https://github.com/ayasesakurashin-dotcom/AyaseCompanion)。P0/P1、P2 已通过人工实机验收，当前开发基线为 **v0.2.0**；首个正式基线 **v0.1.0** 的标签与附件保留。
+公开仓库：[AyaseCompanion](https://github.com/ayasesakurashin-dotcom/AyaseCompanion)。P0/P1、P2、P3 已通过人工实机验收，当前开发基线为 **v0.3.0**；此前 **v0.1.0**、**v0.2.0** 的标签与附件保留。
 
 ## 阶段发布
 

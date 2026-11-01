@@ -12,8 +12,8 @@ const id=()=>crypto.randomUUID();
 export function setupControl(root:HTMLElement){
   let state:Snapshot|null=null,libraryKey='',pluginsKey='',assetsKey='',nameOwner='',nameDirty=false,bubbleDirty=false;
   root.innerHTML=`<div class="control-shell">
-    <header><img class="brand-mark" src="${appIcon}" alt="AyaseCompanion"><div><h1>AyaseCompanion</h1><p>你的桌面伙伴</p></div><span class="version">0.3.0 <b>P3 · 实机验收候选</b></span></header>
-    <div class="notice">P3 候选加入屏幕观察、公开资料搜索与默认关怀。新服务与行为需单独配置；尚未发布。</div>
+    <header><img class="brand-mark" src="${appIcon}" alt="AyaseCompanion"><div><h1>AyaseCompanion</h1><p>你的桌面伙伴</p></div><span class="version">0.3.0 <b>P3 · 已验收基线</b></span></header>
+    <div class="notice">P3 已完成人工实机验收。屏幕观察、公开资料搜索与默认关怀等服务和行为需单独配置并启用。</div>
     <nav aria-label="控制台页面"><button class="selected" data-tab="home">伙伴</button><button data-tab="play">播放验证</button><button data-tab="plugins">行为插件</button><button data-tab="diagnostics">运行记录</button></nav>
     <div id="message" role="status" aria-live="polite"></div>
     <section data-panel="home">

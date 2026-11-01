@@ -721,7 +721,7 @@ impl Host {
             facts.fullscreen_status = "采集超时 / 状态未知".into();
             facts.media_status = "采集超时 / 状态未知".into();
         }
-        json!({"version":"0.3.0","stage":"P3 · 实机验收候选","p3":self.p3_snapshot(),"ai":self.ai_snapshot(),"instance":self.instance(),"instances":self.store.instances.iter().map(|i|json!({"id":i.id,"name":i.name,"packageHash":i.package_hash})).collect::<Vec<_>>(),"library":self.store.library,
+        json!({"version":"0.3.0","stage":"P3 · 已验收基线","p3":self.p3_snapshot(),"ai":self.ai_snapshot(),"instance":self.instance(),"instances":self.store.instances.iter().map(|i|json!({"id":i.id,"name":i.name,"packageHash":i.package_hash})).collect::<Vec<_>>(),"library":self.store.library,
             "package":self.package.as_ref().map(|p|&p.report),"manifest":self.package.as_ref().map(|p|&p.manifest),"model":self.package.as_ref().and_then(|p|p.model.as_ref()),"assetPaths":asset_paths,
             "plugins":plugins,"configured":known,"unknownPresets":unknown,"scheduler":self.scheduler.snapshot(),"facts":facts,"zoom":self.store.zoom,"bubble":self.store.bubble,"excluded":self.store.excluded,"dataDirectory":self.root.to_string_lossy()})
     }
