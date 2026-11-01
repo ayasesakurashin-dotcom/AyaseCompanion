@@ -257,7 +257,11 @@ impl Host {
             }
             let result = if candidate.observe {
                 let id = self.generate(
-                    json!({"mode":"generated","intent":"根据本次画面事实简短评论"}),
+                    if context.observation_only {
+                        json!({"mode":"generated","intent":"根据本次画面事实简短评论"})
+                    } else {
+                        candidate.response.clone()
+                    },
                     &c.owner,
                     c.priority,
                     true,

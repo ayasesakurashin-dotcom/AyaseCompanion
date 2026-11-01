@@ -123,6 +123,26 @@ pub fn valid_time(s: &str) -> bool {
 }
 pub fn validate_response(response: &Value) -> Result<(), String> {
     schema::validate(&schema::contract("request"), response)?;
+    if response["mode"] == "state-specific" {
+        let mut states = BTreeSet::new();
+        let mut ids = BTreeSet::new();
+        for route in response["stateResponses"].as_array().into_iter().flatten() {
+            if !states.insert(route["base"].to_string())
+                || !ids.insert(route["id"].as_str().unwrap())
+            {
+                return Err(
+                    "同一状态和状态条目id不能重复；随机文字请在该状态的variants/fallback内配置"
+                        .into(),
+                );
+            }
+            if route["response"]["mode"] == "state-specific" {
+                return Err("状态回复不可递归嵌套".into());
+            }
+            validate_response(&route["response"])?;
+        }
+        return Ok(());
+    }
+    material_values(&response["animationAsset"], true)?;
     if response["mode"] != "fixed" {
         if response["intent"]
             .as_str()
@@ -149,6 +169,7 @@ pub fn validate_response(response: &Value) -> Result<(), String> {
         let text_assets = material_values(&v["textAsset"], true)?;
         material_values(&v["audioAsset"], true)?;
         material_values(&v["cue"], true)?;
+        material_values(&v["animationAsset"], true)?;
         if !text.is_empty() && !text_assets.is_empty() {
             return Err("text 与 textAsset 必须二选一".into());
         }
@@ -157,6 +178,21 @@ pub fn validate_response(response: &Value) -> Result<(), String> {
         }
     }
     Ok(())
+}
+/// No implicit default body is used when a state-specific table has no match.
+pub fn response_for_base<'a>(
+    response: &'a Value,
+    base: &str,
+) -> Option<(&'a Value, Option<&'a str>)> {
+    if response["mode"] != "state-specific" {
+        return Some((response, None));
+    }
+    let routes = response["stateResponses"].as_array()?;
+    let route = routes
+        .iter()
+        .find(|r| r["base"] == base)
+        .or_else(|| routes.iter().find(|r| r["base"].is_null()))?;
+    Some((&route["response"], route["id"].as_str()))
 }
 /// IDs accept comma/newline shorthand; literal text keeps punctuation and line breaks.
 /// The same bounded normalization is used by validation and the host resolver.
@@ -582,6 +618,36 @@ mod tests {
                     .is_err()
             );
         }
+    }
+    #[test]
+    fn state_specific_contract_validates_branches_and_rejects_duplicates() {
+        let fixed = serde_json::json!({"mode":"fixed","variants":[{"id":"one","text":"A","animationAsset":["anime.start","anime.end"]}]});
+        let mut response = serde_json::json!({"mode":"state-specific","stateResponses":[{"id":"idle","base":"idle","response":fixed},{"id":"all","base":null,"response":{"mode":"generated","intent":"respond naturally","animationAsset":"anime.start,anime.end"}}]});
+        validate_response(&response).unwrap();
+        assert_eq!(
+            response_for_base(&response, "idle").unwrap().1,
+            Some("idle")
+        );
+        assert_eq!(
+            response_for_base(&response, "quiet").unwrap().1,
+            Some("all")
+        );
+        response["stateResponses"].as_array_mut().unwrap().pop();
+        assert!(response_for_base(&response, "quiet").is_none());
+        for branch in [
+            serde_json::json!({"id":"other","base":"idle","response":fixed}),
+            serde_json::json!({"id":"idle","base":"music","response":fixed}),
+            serde_json::json!({"id":"nested","base":"music","response":{"mode":"state-specific","stateResponses":[]}}),
+        ] {
+            let mut invalid = response.clone();
+            invalid["stateResponses"]
+                .as_array_mut()
+                .unwrap()
+                .push(branch);
+            assert!(validate_response(&invalid).is_err());
+        }
+        validate_response(&serde_json::json!({"mode":"state-specific","stateResponses":[]}))
+            .unwrap();
     }
     #[test]
     fn unknown_config_stays_disabled() {

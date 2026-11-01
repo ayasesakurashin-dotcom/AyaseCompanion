@@ -105,6 +105,7 @@ pub enum Event {
     Generation(Value),
     Observation(crate::p3::Observation),
     ObservationOnly,
+    FixedReady,
     Text(String),
     StreamEnd(Result<(), String>),
     Audio(usize, Result<(Vec<u8>, String), String>),
@@ -188,6 +189,11 @@ pub fn launch(
         }
         if spec.context.observation_only {
             let _ = send(&tx, Event::ObservationOnly, &cancel);
+            let _ = tx.send(Event::Finished);
+            return;
+        }
+        if spec.response["mode"] == "fixed" {
+            let _ = send(&tx, Event::FixedReady, &cancel);
             let _ = tx.send(Event::Finished);
             return;
         }

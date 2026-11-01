@@ -35,5 +35,7 @@ test('打字机按字形簇显现，阅读计时独立于显现时间',()=>{
   assert.equal(revealCount(1000,10,defaultBubblePreferences),10);
   assert.equal(revealCount(0,10,{...defaultBubblePreferences,animation:'none'}),10);
   assert.equal(readingTime(10,defaultBubblePreferences),2800);
+  assert.equal(readingTime(1,defaultBubblePreferences,1000),2800);
+  assert.equal(readingTime(1,defaultBubblePreferences,7000),7000);
   assert.equal(readingTime(80,defaultBubblePreferences,1000),5600);
 });

@@ -37,7 +37,7 @@ export function revealCount(elapsed:number,count:number,preferences:BubblePrefer
   return preferences.animation==='none'?count:Math.min(count,Math.floor(Math.max(0,elapsed)*preferences.charactersPerSecond/1000));
 }
 export function readingTime(count:number,preferences:BubblePreferences,taskReadMs?:number):number {
-  return Math.max(taskReadMs??preferences.readMs,count*70);
+  return Math.max(preferences.readMs,taskReadMs??0,count*70);
 }
 
 /** Text owns its own completion and visibility; audio/animation do not extend its lifetime. */

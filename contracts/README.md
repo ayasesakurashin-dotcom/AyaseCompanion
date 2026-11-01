@@ -30,6 +30,18 @@
 
 运行计划增加 `textSegments`、复用有序 `audioSegments` 和 `clips`；不增加子任务。`variant-started` 诊断包含任务、变体 id 和 fixed/fallback 来源，`audio-segment` 继续逐段报告开始/结束。
 
+`readMs` 仅能延长阅读时间。每页完整显现后的停留取全局 `bubble.readMs`、条目 `readMs`、该页字数估算的最大值；短素材、各素材最后一页及后备同样遵守全局下限。
+
+## 直接动画与状态回复
+
+固定/后备条目和生成回复可填 `animationAsset`（null、单字符串或字符串数组，最多32项），编号支持逗号/换行。优先解释为当前模型的 clip ID（兼容显式 `clip:` 前缀），否则要求素材 ID 唯一对应一个 clip。图集对应多种帧序时不猜测，须指定 clip；未知可选编号跳过。与 `cue` 并存时，先依次展开语义映射及repeat，再顺序执行直接片段。直接播放 music_start 等有限片段不产生业务 BaseClaim，不改变状态条件。
+
+`response.mode: state-specific` 的 `stateResponses[]` 为最多4项 `{id, base, response}`，base 为 null / idle / music / quiet，每个状态及id唯一。子response为原fixed、generated或generated-with-fallback协议，不允许再次嵌套状态表。null是通用项；当前状态专用项优先，再尝试通用，均不存在则拒绝，不使用外层遗留正文或提示词。旧回复无需状态表，继续全状态通用。
+
+状态来自宿主按优先级/序号/模型能力求出的有效基础目标，与基础协调器共用 `effective_base`，不把有限动作或过渡帧当作新状态。触发时选择回复，并在未开始期间及实际started授权前核验原状态；改变则取消旧候选，不重新生成或换成另一分支。已开始任务维持非抢占。按状态选择的通用分支也绑定触发时的基础状态，避免排队后覆盖新状态专用回复；原不带状态表的通用回复不受此限制。
+
+状态分支各有独立固定/后备防重复记录。`stateGuard` 属于本机任务计划，包含基础状态及路由id，随生成失败的固定后备保留；拒绝诊断为 `response-state-skipped`。状态配置随包导出，运行记录和状态快照不导出。配置条件不绕过既有静默、预算、时段、冷却或权限。观察插件开口评论时应用状态表；仅记录观察时不以回复表限制采集。
+
 ## 往返端点
 
 四帧示例：forward 为 0,1,2,3；reverse 为 3,2,1,0。

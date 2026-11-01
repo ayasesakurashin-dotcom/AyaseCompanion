@@ -468,6 +468,19 @@ impl Scheduler {
         }
     }
     /// Reconcile only the latest requested base. A started transition is immutable.
+    pub fn effective_base(&self, model: &Value) -> String {
+        let best = self.claims.values().max_by(|a, b| {
+            a.priority
+                .cmp(&b.priority)
+                .then_with(|| b.sequence.cmp(&a.sequence))
+        });
+        let requested = best.map(|c| c.mode.as_str()).unwrap_or("idle");
+        if model["baseModes"][requested].is_object() {
+            requested.into()
+        } else {
+            "idle".into()
+        }
+    }
     pub fn reconcile_base(&mut self, model: &Value, now: u64) {
         let best = self
             .claims
@@ -478,13 +491,7 @@ impl Scheduler {
                     .then_with(|| b.sequence.cmp(&a.sequence))
             })
             .cloned();
-        let desired = best.as_ref().map(|c| c.mode.as_str()).unwrap_or("idle");
-        let desired = if model["baseModes"][desired].is_object() {
-            desired
-        } else {
-            "idle"
-        }
-        .to_string();
+        let desired = self.effective_base(model);
         self.desired_base = desired.clone();
         if self.base_transition.is_some() {
             return;

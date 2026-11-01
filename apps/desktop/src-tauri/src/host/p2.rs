@@ -98,7 +98,21 @@ impl Host {
         revision: u64,
         input: Option<String>,
     ) -> Result<u64, String> {
-        plugin::validate_response(&response)?;
+        let (response, guard) = self.select_response(&response, owner)?;
+        let deferred_fixed = response["mode"] == "fixed"
+            && self.configured().iter().any(|c| {
+                c.owner == owner
+                    && c.config["reply"] == true
+                    && self
+                        .plugins
+                        .get(&c.plugin_id)
+                        .is_some_and(|p| p.manifest["hostBehavior"] == "observation")
+            });
+        if response["mode"] == "fixed" && !deferred_fixed {
+            return self.present_selected_variants(
+                response, guard, owner, priority, proactive, ttl, revision,
+            );
+        }
         let instance = self.instance().ok_or("请先选择伙伴")?.id.clone();
         let profile_revision = self.instance().unwrap().profile_revision;
         let mut profile = self.profile();
@@ -117,7 +131,13 @@ impl Host {
         let turn = Uuid::new_v4().to_string();
         let user = input.is_some();
         let input=input.unwrap_or_else(||format!("请按当前角色人格自然地发起一次互动。此次目的：{}。不要把这条主动互动当成用户说过的话。",response["intent"].as_str().unwrap_or("自然问候")));
-        let (mut plan, _) = self.resolve_variant(&json!({"cue":response["cue"]}), owner)?;
+        let (mut plan, _) = self.resolve_variant(
+            &json!({"cue":response["cue"],"animationAsset":response["animationAsset"]}),
+            owner,
+        )?;
+        if guard.is_object() {
+            plan["stateGuard"] = guard;
+        }
         plan["stream"] = json!(true);
         plan["text"] = json!("");
         plan["streamDone"] = json!(false);
@@ -579,6 +599,31 @@ impl Host {
                 self.scheduler
                     .finish(id, Status::Completed, "观察已保存，未请求主动回复", now);
             }
+            conversation::Event::FixedReady => {
+                let guard = self
+                    .scheduler
+                    .tasks
+                    .iter()
+                    .find(|t| t.id == id)
+                    .map(|t| t.plan["stateGuard"].clone())
+                    .unwrap_or(Value::Null);
+                match self.variant_plan_guarded(
+                    &job.spec.response,
+                    &job.spec.source,
+                    "fixed",
+                    &guard,
+                    super::variants::random_unit(),
+                ) {
+                    Ok((mut plan, channels)) => {
+                        if let Some(task) = self.scheduler.tasks.iter().find(|t| t.id == id) {
+                            plan["evidence"] = task.plan["evidence"].clone();
+                        }
+                        self.scheduler
+                            .ready(id, job.spec.generation, plan, channels, now);
+                    }
+                    Err(reason) => self.scheduler.finish(id, Status::Failed, &reason, now),
+                }
+            }
             conversation::Event::Text(delta) => {
                 if let Some(t) = self.scheduler.tasks.iter_mut().find(|t| t.id == id) {
                     let mut text = t.plan["text"].as_str().unwrap_or("").to_owned();
@@ -603,10 +648,18 @@ impl Host {
                     if job.spec.response["mode"] == "generated-with-fallback" {
                         let response =
                             json!({"mode":"fixed","variants":job.spec.response["fallback"]});
-                        if let Ok((mut plan, channels)) = self.variant_plan(
+                        let guard = self
+                            .scheduler
+                            .tasks
+                            .iter()
+                            .find(|t| t.id == id)
+                            .map(|t| t.plan["stateGuard"].clone())
+                            .unwrap_or(Value::Null);
+                        if let Ok((mut plan, channels)) = self.variant_plan_guarded(
                             &response,
                             &job.spec.source,
                             "fallback",
+                            &guard,
                             super::variants::random_unit(),
                         ) {
                             if let Some(task) = self.scheduler.tasks.iter().find(|t| t.id == id) {

@@ -547,3 +547,122 @@ fn char_budget_and_upstream_length_are_diagnosed_without_speaking_a_different_bo
             .any(|e| e["event"] == "generation-result" && e["detail"]["taskId"] == id));
     }
 }
+#[test]
+fn state_generated_prompt_and_direct_animations_are_selected_before_services() {
+    let (_root, server, mut h) = fixture();
+    let model = h.package.as_mut().unwrap().model.as_mut().unwrap();
+    model["baseModes"]["music"] = json!({"loop":"idle"});
+    model["clips"]["anime.music_start"] = model["clips"]["idle"].clone();
+    h.scheduler.claim("media", "music", Priority::Normal, false);
+    let response = json!({"mode":"state-specific","stateResponses":[{"id":"idle","base":"idle","response":{"mode":"generated","intent":"idle-only-intent"}},{"id":"music","base":"music","response":{"mode":"generated","intent":"用户正在听音乐，回应用户的点击。","animationAsset":["anime.music_start","idle"],"voice":{"mode":"off"}}}]});
+    let id = h
+        .generate(
+            response,
+            "test.route",
+            Priority::Normal,
+            false,
+            60000,
+            0,
+            None,
+        )
+        .unwrap();
+    assert!(h
+        .ai
+        .pending
+        .back()
+        .unwrap()
+        .input
+        .contains("用户正在听音乐"));
+    wait(&mut h, |h| h.ai.jobs.get(&id).is_some_and(|j| j.finished));
+    let task = h
+        .scheduler
+        .tasks
+        .iter()
+        .find(|t| t.id == id)
+        .unwrap()
+        .clone();
+    assert_eq!(task.plan["stateGuard"]["base"], "music");
+    assert_eq!(task.plan["clips"], json!(["anime.music_start", "idle"]));
+    let requests = server.requests.lock().unwrap();
+    let body = &requests
+        .iter()
+        .find(|r| r["path"].as_str().unwrap().contains("chat/completions"))
+        .unwrap()["body"];
+    assert!(body.to_string().contains("用户正在听音乐"));
+    assert!(!body.to_string().contains("idle-only-intent"));
+    drop(requests);
+    finish(&mut h);
+}
+#[test]
+fn stale_state_prevents_unstarted_generation_and_explicit_fallback() {
+    let (_root, server, mut h) = fixture();
+    h.package.as_mut().unwrap().model.as_mut().unwrap()["baseModes"]["music"] =
+        json!({"loop":"idle"});
+    let response = json!({"mode":"state-specific","stateResponses":[{"id":"music","base":"music","response":{"mode":"generated-with-fallback","intent":"[fail]","fallback":[{"id":"music-fallback","text":["music one","music two"],"animationAsset":"idle"}]}}]});
+    h.scheduler.claim("media", "music", Priority::Normal, false);
+    let cancelled = h
+        .generate(
+            response.clone(),
+            "test.route",
+            Priority::Normal,
+            false,
+            60000,
+            0,
+            None,
+        )
+        .unwrap();
+    h.scheduler.claims.clear();
+    h.tick();
+    assert!(server.requests.lock().unwrap().is_empty());
+    assert_eq!(
+        h.scheduler
+            .tasks
+            .iter()
+            .find(|t| t.id == cancelled)
+            .unwrap()
+            .status,
+        Status::Cancelled
+    );
+    h.scheduler.claim("media", "music", Priority::Normal, false);
+    let id = h
+        .generate(
+            response,
+            "test.route",
+            Priority::Normal,
+            false,
+            60000,
+            0,
+            None,
+        )
+        .unwrap();
+    wait(&mut h, |h| h.scheduler.active().is_some_and(|t| t.id == id));
+    let task = h.scheduler.active().unwrap().clone();
+    assert_eq!(task.plan["textSegments"], json!(["music one", "music two"]));
+    assert_eq!(task.plan["stateGuard"]["routeId"], "music");
+    h.scheduler.claims.clear();
+    assert!(!h.start_presentation(id, task.generation, h.now()));
+    assert_eq!(
+        h.scheduler
+            .tasks
+            .iter()
+            .find(|t| t.id == id)
+            .unwrap()
+            .status,
+        Status::Cancelled
+    );
+    finish(&mut h);
+}
+#[test]
+fn fixed_observation_reply_prepares_evidence_without_calling_chat_or_tts() {
+    let (_root, server, mut h) = fixture();
+    h.instance_mut().unwrap().overrides["extraPresets"].as_array_mut().unwrap().push(json!({"presetId":"test.observation","pluginId":"ayase.observation","configVersion":"1.0","enabled":false,"config":{"reply":true}}));
+    let id=h.generate(json!({"mode":"fixed","variants":[{"id":"fixed","text":"prepared fixed reply","animationAsset":"idle"}]}),"test.observation",Priority::Normal,false,60000,0,None).unwrap();
+    assert!(h.ai.pending.iter().any(|s| s.id == id));
+    wait(&mut h, |h| h.scheduler.active().is_some_and(|t| t.id == id));
+    let task = h.scheduler.active().unwrap();
+    assert_eq!(task.plan["text"], "prepared fixed reply");
+    assert!(task.plan["evidence"].is_object());
+    assert_ne!(task.plan["stream"], true);
+    assert!(server.requests.lock().unwrap().is_empty());
+    finish(&mut h);
+}

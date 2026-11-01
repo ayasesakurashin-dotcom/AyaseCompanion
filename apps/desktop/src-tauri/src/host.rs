@@ -22,6 +22,7 @@ use uuid::Uuid;
 mod hit_testing;
 mod p2;
 mod p3;
+mod responses;
 mod variants;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -563,6 +564,25 @@ impl Host {
                 }
             }
         }
+        let model = p.model.as_ref().unwrap();
+        for id in plugin::material_values(&v["animationAsset"], true)? {
+            let direct = id.strip_prefix("clip:").unwrap_or(&id);
+            if model["clips"][direct].is_object() {
+                clips.push(direct.to_owned());
+                continue;
+            }
+            let matches: Vec<_> = model["clips"]
+                .as_object()
+                .unwrap()
+                .iter()
+                .filter(|(_, clip)| clip["asset"] == id)
+                .map(|(name, _)| name.clone())
+                .collect();
+            if matches.len() > 1 {
+                return Err(format!("动画素材{id}对应多个片段，请选择具体片段编号"));
+            }
+            clips.extend(matches);
+        }
         if !clips.is_empty() {
             plan["clips"] = json!(clips);
             channels.push("animation".into());
@@ -598,6 +618,7 @@ impl Host {
     }
     fn tick(&mut self) {
         let now = self.now();
+        self.discard_stale_responses();
         self.ai_tick();
         let wall = Utc::now();
         if self.package.is_none() {
@@ -645,6 +666,7 @@ impl Host {
             let app = self.app.clone();
             self.p3_tick(wall, None, app.as_ref());
         }
+        self.discard_stale_responses();
         if let Some(model) = self.package.as_ref().and_then(|p| p.model.as_ref()) {
             self.scheduler.reconcile_base(model, now);
         }

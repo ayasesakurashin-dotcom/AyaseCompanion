@@ -22,7 +22,7 @@ export function setupControl(root:HTMLElement){
       <div class="settings-row"><label>显示大小 <input id="zoom" type="range" min="0.6" max="1.6" step="0.1" value="1"></label><label class="switch"><input id="muted" type="checkbox">静音</label><button data-action="stop">停止当前回复</button></div>
       <div class="settings-row"><label>切换已创建的伙伴 <select id="instances"></select></label><button data-action="select-instance">切换</button></div>
       <div class="settings-row"><label>当前伙伴名称 <input id="instance-name" maxlength="80" placeholder="为这位伙伴取个名字"></label><button data-action="rename">保存名称</button></div>
-      <details class="bubble-settings"><summary>气泡外观与阅读</summary><p>气泡跟随角色大小，字体单独调整；读完自动收起。设置保存在本机，后续纳入气泡主题。</p><div class="grid-two"><label>文字动画<select id="bubble-animation"><option value="typewriter">打字机</option><option value="none">立即显示</option></select></label><label>显现速度（字 / 秒）<input id="bubble-speed" type="number" min="10" max="80" value="30"></label><label>字号（像素）<input id="bubble-font" type="number" min="12" max="24" value="15"></label><label>每页最少阅读时间（毫秒）<input id="bubble-read" type="number" min="1000" max="10000" value="2800"></label></div><button data-action="save-bubble" class="primary">保存气泡设置</button><p class="hint">完整显示一页后才开始阅读计时；较长页面会自动延长。播放验证中的阅读时间可单独覆盖本值。</p></details>
+      <details class="bubble-settings"><summary>气泡外观与阅读</summary><p>气泡跟随角色大小，字体单独调整；读完自动收起。设置保存在本机，后续纳入气泡主题。</p><div class="grid-two"><label>文字动画<select id="bubble-animation"><option value="typewriter">打字机</option><option value="none">立即显示</option></select></label><label>显现速度（字 / 秒）<input id="bubble-speed" type="number" min="10" max="80" value="30"></label><label>字号（像素）<input id="bubble-font" type="number" min="12" max="24" value="15"></label><label>每页最少阅读时间（毫秒）<input id="bubble-read" type="number" min="1000" max="10000" value="2800"></label></div><button data-action="save-bubble" class="primary">保存气泡设置</button><p class="hint">完整显示一页后才开始阅读计时；较长页面会自动延长。播放验证中的阅读时间可以延长，不能缩短此下限。</p></details>
       <div id="library" class="list empty">还没有素材包。先导入你自己的角色包。</div>
       <div class="actions bottom"><button data-action="export">导出当前角色包</button><label>导出包版本 <input id="export-version" value="0.3.0" size="12"></label><button data-action="exit" class="quiet">退出应用</button></div>
       <details><summary>全屏检测范围与排除应用</summary><p>仅检测桌宠所在显示器的前台无标题栏全屏窗口；有标题栏的最大化窗口不算全屏。排除项填进程文件名，以逗号分隔。媒体检测使用 Windows 媒体会话，不支持该接口的播放器不会被识别。</p><label>排除应用 <input id="excluded" placeholder="example.exe, another.exe"></label><button data-action="save-excluded">保存</button></details>
@@ -47,7 +47,7 @@ export function setupControl(root:HTMLElement){
       <div id="diagnostic-state" class="inline-state"></div><div class="table-wrap"><table><thead><tr><th>任务</th><th>来源</th><th>优先级</th><th>状态</th><th>通道</th></tr></thead><tbody id="task-rows"></tbody></table></div>
       <details open><summary>最近事件</summary><pre id="event-log"></pre></details><p class="hint" id="data-location"></p>
     </section>
-    <dialog id="plugin-editor"><form method="dialog"><div class="section-title"><h2 id="editor-title">插件配置</h2><button value="cancel" aria-label="关闭编辑器">×</button></div><p>修改只保存在当前伙伴的本地覆盖中。</p><div class="grid-two"><label class="switch"><input id="edit-enabled" type="checkbox">启用这份配置</label><label>优先级<select id="edit-priority"><option value="background">后台</option><option value="normal">普通</option><option value="important">重要</option></select></label></div><div id="schema-form"></div><details><summary>完整配置（保留未知字段）</summary><textarea id="edit-json" rows="12" spellcheck="false"></textarea><button type="button" data-action="apply-json">应用到表单</button></details><p id="editor-error" role="alert"></p><div class="actions"><button type="button" class="primary" data-action="save-preset">保存配置</button><button value="cancel">取消</button></div></form></dialog>
+    <dialog id="plugin-editor"><form method="dialog"><div class="section-title"><h2 id="editor-title">插件配置</h2><button value="cancel" aria-label="关闭编辑器">×</button></div><p>修改只保存在当前伙伴的本地覆盖中。</p><p id="editor-base" class="hint"></p><div class="grid-two"><label class="switch"><input id="edit-enabled" type="checkbox">启用这份配置</label><label>优先级<select id="edit-priority"><option value="background">后台</option><option value="normal">普通</option><option value="important">重要</option></select></label></div><div id="schema-form"></div><details><summary>完整配置（保留未知字段）</summary><textarea id="edit-json" rows="12" spellcheck="false"></textarea><button type="button" data-action="apply-json">应用到表单</button></details><p id="editor-error" role="alert"></p><div class="actions"><button type="button" class="primary" data-action="save-preset">保存配置</button><button value="cancel">取消</button></div></form></dialog>
   </div>`;
   const updateP2=setupP2(root);
   const updateP3=setupP3(root);
@@ -56,7 +56,7 @@ export function setupControl(root:HTMLElement){
   const message=(s:string,error=false)=>{const el=$('#message');el.textContent=s;el.className=error?'error':'success';};
   const run=async(fn:()=>Promise<unknown>)=>{try{await fn();}catch(e){message(String(e),true);}};
   let editing:Json|null=null,formSchema:Json={};
-  const defaults=(schema:Json):any=>schema.default??(schema.const!==undefined?schema.const:schema.enum?schema.enum[0]:schema.type==='object'?Object.fromEntries(Object.entries(schema.properties??{}).map(([k,v])=>[k,defaults(v as Json)])):schema.type==='array'?[]:schema.type==='boolean'?false:schema.type==='integer'||schema.type==='number'?schema.minimum??0:'');
+  const defaults=(schema:Json):any=>schema.properties?.mode?.enum?.includes('generated-with-fallback')&&schema.properties?.variants?{mode:'fixed',variants:[]}:schema.default??(schema.const!==undefined?schema.const:schema.enum?schema.enum[0]:schema.type==='object'?Object.fromEntries(Object.entries(schema.properties??{}).map(([k,v])=>[k,defaults(v as Json)])):schema.type==='array'?[]:schema.type==='boolean'?false:schema.type==='integer'||schema.type==='number'?schema.minimum??0:'');
   function form(){
     const container=$('#schema-form');container.replaceChildren();if(!editing)return;
     function field(schema:Json,current:any,key:string,onChange:(v:any)=>void,parent:HTMLElement){
@@ -65,24 +65,39 @@ export function setupControl(root:HTMLElement){
       if(alternatives)schema={...schema,...(alternatives.find((s:Json)=>s.type===(Array.isArray(current)?'array':'string'))??alternatives[0])};
       const wrap=document.createElement('div');wrap.className='field';parent.append(wrap);
       const title=document.createElement('label');title.textContent=schema.title??key;wrap.append(title);
+      let readCurrent=()=>current;
       if(schema.type==='object'&&schema.properties){
         const obj=current&&typeof current==='object'?structuredClone(current):{};
         const group=document.createElement('fieldset');wrap.append(group);
-        for(const[k,s]of Object.entries(schema.properties)){field(s as Json,obj[k]??defaults(s as Json),k,v=>{obj[k]=v;onChange(obj);},group);}
+        const reply=!!schema.properties.mode?.enum?.includes('generated-with-fallback')&&!!schema.properties.variants;
+        for(const[k,s]of Object.entries(schema.properties)){
+          if(reply&&((obj.mode==='state-specific'&&!['mode','stateResponses'].includes(k))||(obj.mode!=='state-specific'&&(k==='stateResponses'||(k==='variants'&&obj.mode!=='fixed')||(k==='fallback'&&obj.mode!=='generated-with-fallback')||(['intent','voice'].includes(k)&&obj.mode==='fixed')||(['cue','animationAsset'].includes(k)&&obj.mode==='fixed')))))continue;
+          field(s as Json,obj[k]??defaults(s as Json),k,v=>{obj[k]=v;
+            if(reply&&k==='mode'){
+              for(const name of ['variants','fallback'])if(Array.isArray(obj[name])&&!obj[name].length)delete obj[name];
+              if(!obj.intent)delete obj.intent;
+              if(v==='state-specific')obj.stateResponses??=[];
+              else if(v==='fixed')obj.variants??=[];
+              else{obj.intent??='';if(v==='generated-with-fallback')obj.fallback??=[];}
+            }
+            onChange(obj);if(reply&&k==='mode')form();},group);
+        }
       }else if(schema.type==='array'&&schema.items){
-        const arr=Array.isArray(current)?structuredClone(current):[];const list=document.createElement('div');wrap.append(list);
+        const arr=Array.isArray(current)?structuredClone(current):[];readCurrent=()=>arr;const list=document.createElement('div');wrap.append(list);
         arr.forEach((entry,index)=>{const item=document.createElement('div');item.className='array-item';list.append(item);field(schema.items,entry,`条目 ${index+1}`,v=>{arr[index]=v;onChange(arr);},item);
           const remove=document.createElement('button');remove.type='button';remove.textContent='删除此项';item.append(remove);remove.onclick=()=>{arr.splice(index,1);onChange(arr);form();};});
         const add=document.createElement('button');add.type='button';add.textContent='添加条目';add.disabled=arr.length>=schema.maxItems;wrap.append(add);add.onclick=()=>{const item=defaults(schema.items);if(item&&typeof item==='object'&&!Array.isArray(item)&&schema.items.properties?.id)item.id=id();arr.push(item);onChange(arr);form();};
-      }else if(schema.enum){const select=document.createElement('select');schema.enum.forEach((v:any)=>{const o=document.createElement('option');o.value=String(v);o.textContent=String(v);select.append(o);});select.value=String(current);select.onchange=()=>onChange(select.value);wrap.append(select);
+      }else if(schema.enum){const select=document.createElement('select');schema.enum.forEach((v:any)=>{const o=document.createElement('option');o.value=String(v);o.textContent=v===null?'通用（所有状态）':v==='state-specific'?'state-specific · 按基础状态选择':String(v);select.append(o);});select.value=String(current);select.onchange=()=>onChange(schema.enum.find((v:any)=>String(v)===select.value));wrap.append(select);
       }else if(schema.type==='boolean'){const input=document.createElement('input');input.type='checkbox';input.checked=Boolean(current);input.onchange=()=>onChange(input.checked);wrap.append(input);
       }else if(schema.type==='object'||Array.isArray(current)){const input=document.createElement('textarea');input.value=JSON.stringify(current,null,2);input.rows=5;input.onchange=()=>{try{onChange(JSON.parse(input.value));input.setCustomValidity('');}catch{input.setCustomValidity('请输入有效 JSON');}};wrap.append(input);
       }else{const input=document.createElement(schema.type==='string'&&(key==='text'||key==='intent'||schema.maxLength>=2000||['audioAsset','textAsset','cue'].includes(key))?'textarea':'input') as HTMLInputElement|HTMLTextAreaElement;
         if(input instanceof HTMLInputElement){input.type=schema.type==='number'||schema.type==='integer'?'number':schema.pattern?.includes('[0-5]')?'time':'text';if(schema.minimum!==undefined)input.min=String(schema.minimum);if(schema.maximum!==undefined)input.max=String(schema.maximum);}
         input.value=String(current??'');input.disabled=schema.const!==undefined;
+        readCurrent=()=>input.value;
         input.oninput=()=>onChange(nullable&&input.value===''?null:schema.type==='number'||schema.type==='integer'?Number(input.value):input.value);wrap.append(input);
         if(key==='text'&&alternatives?.some((s:Json)=>s.type==='array')){const multi=document.createElement('button');multi.type='button';multi.textContent='改为多段文字';wrap.append(multi);multi.onclick=()=>{onChange(input.value?[input.value]:[]);form();};}
       }
+      if(key==='animationAsset'&&state?.model){const picker=document.createElement('select');picker.setAttribute('aria-label','添加当前模型动画');picker.innerHTML='<option value="">选择动画片段添加到末尾…</option>'+Object.entries(state.model.clips).map(([id,clip])=>`<option value="${esc(id)}">${esc(id)} · ${esc(clip.asset)}</option>`).join('');picker.onchange=()=>{if(!picker.value)return;const value=readCurrent();onChange(Array.isArray(value)?[...value,picker.value]:[String(value??'').trim(),picker.value].filter(Boolean).join('\n'));form();};wrap.append(picker);}
       if(schema.description){const hint=document.createElement('small');hint.textContent=schema.description;wrap.append(hint);}
     }
     field(formSchema,editing.config,'参数',v=>{editing!.config=v;$<HTMLTextAreaElement>('#edit-json').value=JSON.stringify(editing!.config,null,2);},container);
@@ -128,7 +143,7 @@ export function setupControl(root:HTMLElement){
   const date=new Date();date.setHours(23,0,0,0);$<HTMLInputElement>('#sim-time').value=new Date(+date-date.getTimezoneOffset()*60_000).toISOString().slice(0,16);
   return (s:Snapshot)=>{
     updateP2(s);updateP3(s);
-    state=s;$('#active-name').textContent=s.instance?.name??'尚未激活';$('#active-detail').textContent=s.package?`${s.package.id} · ${s.package.version}`:'导入角色包后，选择“创建新伙伴”。';
+    state=s;$('#editor-base').textContent=`当前基础状态：${s.scheduler.desiredBase}。按状态回复优先使用专用项，没有匹配项时跳过。`;$('#active-name').textContent=s.instance?.name??'尚未激活';$('#active-detail').textContent=s.package?`${s.package.id} · ${s.package.version}`:'导入角色包后，选择“创建新伙伴”。';
     if(nameOwner!==(s.instance?.id??''))nameDirty=false;
     if(!nameDirty)$<HTMLInputElement>('#instance-name').value=s.instance?.name??'';
     nameOwner=s.instance?.id??'';

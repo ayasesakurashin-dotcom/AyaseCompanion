@@ -221,3 +221,29 @@ fn material_arrays_keep_order_duplicates_and_deletions_through_form_and_package(
     assert_eq!(actual, &preset);
     assert_eq!(p.configure(actual, &json!({}), 0).config, edited);
 }
+#[test]
+fn state_routes_roundtrip_without_resurrecting_deleted_general_reply() {
+    let p = nightly();
+    let mut base = p.manifest["defaults"].clone();
+    base["response"] = json!({"mode":"state-specific","intent":"unused-old-intent","stateResponses":[{"id":"idle","base":"idle","response":{"mode":"fixed","variants":[{"id":"A","text":"idle"}]}},{"id":"music","base":"music","response":{"mode":"generated-with-fallback","intent":"music context","animationAsset":["anime.music_start","anime.music_end"],"fallback":[{"id":"fallback","text":"music fallback"}]}},{"id":"all","base":null,"response":{"mode":"generated","intent":"general"}}]});
+    let mut edited = base.clone();
+    edited["response"]["stateResponses"]
+        .as_array_mut()
+        .unwrap()
+        .pop();
+    let patch = ayase_core::config::from_form(&base, &edited);
+    let effective = ayase_core::config::effective(&base, &json!({}), &patch);
+    p.validate_config(&effective).unwrap();
+    assert!(ayase_core::plugin::response_for_base(&effective["response"], "quiet").is_none());
+    let (files, mut manifest) = fixture();
+    let preset = json!({"presetId":"states","pluginId":"example.nightly-rest","configVersion":"1.0","configMode":"complete","enabled":true,"config":effective});
+    manifest["pluginPresets"] = json!([preset]);
+    let package = validate(&pack(files, manifest, "manifest.json").unwrap()).unwrap();
+    let roundtrip =
+        validate(&pack(package.files, package.manifest, "manifest.json").unwrap()).unwrap();
+    let configured = p.configure(&roundtrip.manifest["pluginPresets"][0], &json!({}), 0);
+    assert_eq!(configured.config, edited);
+    assert!(
+        ayase_core::plugin::response_for_base(&configured.config["response"], "quiet").is_none()
+    );
+}

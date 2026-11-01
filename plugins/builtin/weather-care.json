@@ -109,9 +109,10 @@
             "enum": [
               "fixed",
               "generated",
-              "generated-with-fallback"
+              "generated-with-fallback",
+              "state-specific"
             ],
-            "title": "回复来源：fixed 固定 / generated 生成 / generated-with-fallback 生成并设后备"
+            "title": "回复来源：fixed 固定 / generated 生成 / generated-with-fallback 后备 / state-specific 按状态"
           },
           "variants": {
             "type": "array",
@@ -220,7 +221,30 @@
                 "readMs": {
                   "type": "integer",
                   "minimum": 1000,
-                  "maximum": 30000
+                  "maximum": 30000,
+                  "title": "每页阅读时间（毫秒，不低于全局下限）",
+                  "description": "可以延长每页停留，不能缩短设置中的每页最少阅读时间。完整显现后才开始计时。"
+                },
+                "animationAsset": {
+                  "title": "动画素材或片段编号",
+                  "description": "直接选择当前模型的动画片段，或唯一对应一个片段的动画素材编号。支持逗号/换行或数组；与语义动作并存时先播放语义动作，再播放本列表。",
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "string",
+                      "maxLength": 8192
+                    },
+                    {
+                      "type": "array",
+                      "maxItems": 32,
+                      "items": {
+                        "type": "string",
+                        "maxLength": 128
+                      }
+                    }
+                  ]
                 }
               }
             },
@@ -339,7 +363,30 @@
                 "readMs": {
                   "type": "integer",
                   "minimum": 1000,
-                  "maximum": 30000
+                  "maximum": 30000,
+                  "title": "每页阅读时间（毫秒，不低于全局下限）",
+                  "description": "可以延长每页停留，不能缩短设置中的每页最少阅读时间。完整显现后才开始计时。"
+                },
+                "animationAsset": {
+                  "title": "动画素材或片段编号",
+                  "description": "直接选择当前模型的动画片段，或唯一对应一个片段的动画素材编号。支持逗号/换行或数组；与语义动作并存时先播放语义动作，再播放本列表。",
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "string",
+                      "maxLength": 8192
+                    },
+                    {
+                      "type": "array",
+                      "maxItems": 32,
+                      "items": {
+                        "type": "string",
+                        "maxLength": 128
+                      }
+                    }
+                  ]
                 }
               }
             },
@@ -367,6 +414,400 @@
               }
             },
             "title": "生成回复的语音策略"
+          },
+          "animationAsset": {
+            "title": "动画素材或片段编号",
+            "description": "直接选择当前模型的动画片段，或唯一对应一个片段的动画素材编号。支持逗号/换行或数组；与语义动作并存时先播放语义动作，再播放本列表。",
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string",
+                "maxLength": 8192
+              },
+              {
+                "type": "array",
+                "maxItems": 32,
+                "items": {
+                  "type": "string",
+                  "maxLength": 128
+                }
+              }
+            ]
+          },
+          "stateResponses": {
+            "type": "array",
+            "title": "基础状态与回复",
+            "description": "专用状态优先，未配置时仅使用通用（null）；两者皆无则不回应。每个状态最多一项。",
+            "maxItems": 4,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "base",
+                "response"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "base": {
+                  "enum": [
+                    null,
+                    "idle",
+                    "music",
+                    "quiet"
+                  ],
+                  "title": "前置基础状态（通用/idle/music/quiet）",
+                  "default": null
+                },
+                "response": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "required": [
+                    "mode"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "mode": {
+                      "enum": [
+                        "fixed",
+                        "generated",
+                        "generated-with-fallback"
+                      ],
+                      "title": "回复来源：fixed 固定 / generated 生成 / generated-with-fallback 后备"
+                    },
+                    "variants": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 64,
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "weight": {
+                            "type": "number",
+                            "minimum": 0.001,
+                            "maximum": 10000
+                          },
+                          "text": {
+                            "title": "固定文字（支持多段）",
+                            "description": "每个列表条目独立分页和阅读；标点与换行保留。整组属于同一任务。",
+                            "anyOf": [
+                              {
+                                "type": "null"
+                              },
+                              {
+                                "type": "string",
+                                "maxLength": 12000
+                              },
+                              {
+                                "type": "array",
+                                "maxItems": 32,
+                                "items": {
+                                  "type": "string",
+                                  "maxLength": 12000
+                                }
+                              }
+                            ]
+                          },
+                          "textAsset": {
+                            "title": "文字素材编号",
+                            "description": "按顺序播放，编号可用逗号或换行分隔，也可使用 JSON 数组；最多32条。",
+                            "anyOf": [
+                              {
+                                "type": "null"
+                              },
+                              {
+                                "type": "string",
+                                "maxLength": 8192
+                              },
+                              {
+                                "type": "array",
+                                "maxItems": 32,
+                                "items": {
+                                  "type": "string",
+                                  "maxLength": 128
+                                }
+                              }
+                            ]
+                          },
+                          "audioAsset": {
+                            "title": "音声素材编号",
+                            "description": "按顺序播放，编号可用逗号或换行分隔，也可使用 JSON 数组；最多32条。",
+                            "anyOf": [
+                              {
+                                "type": "null"
+                              },
+                              {
+                                "type": "string",
+                                "maxLength": 8192
+                              },
+                              {
+                                "type": "array",
+                                "maxItems": 32,
+                                "items": {
+                                  "type": "string",
+                                  "maxLength": 128
+                                }
+                              }
+                            ]
+                          },
+                          "cue": {
+                            "title": "语义动作编号",
+                            "description": "按顺序播放，编号可用逗号或换行分隔，也可使用 JSON 数组；最多32条。",
+                            "anyOf": [
+                              {
+                                "type": "null"
+                              },
+                              {
+                                "type": "string",
+                                "maxLength": 8192
+                              },
+                              {
+                                "type": "array",
+                                "maxItems": 32,
+                                "items": {
+                                  "type": "string",
+                                  "maxLength": 128
+                                }
+                              }
+                            ]
+                          },
+                          "readMs": {
+                            "type": "integer",
+                            "minimum": 1000,
+                            "maximum": 30000,
+                            "title": "每页阅读时间（毫秒，不低于全局下限）",
+                            "description": "可以延长每页停留，不能缩短设置中的每页最少阅读时间。完整显现后才开始计时。"
+                          },
+                          "animationAsset": {
+                            "title": "动画素材或片段编号",
+                            "description": "直接选择当前模型的动画片段，或唯一对应一个片段的动画素材编号。支持逗号/换行或数组；与语义动作并存时先播放语义动作，再播放本列表。",
+                            "anyOf": [
+                              {
+                                "type": "null"
+                              },
+                              {
+                                "type": "string",
+                                "maxLength": 8192
+                              },
+                              {
+                                "type": "array",
+                                "maxItems": 32,
+                                "items": {
+                                  "type": "string",
+                                  "maxLength": 128
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      "title": "固定回复变体"
+                    },
+                    "intent": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000,
+                      "title": "统一人格生成的互动目的"
+                    },
+                    "fallback": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 64,
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "weight": {
+                            "type": "number",
+                            "minimum": 0.001,
+                            "maximum": 10000
+                          },
+                          "text": {
+                            "title": "固定文字（支持多段）",
+                            "description": "每个列表条目独立分页和阅读；标点与换行保留。整组属于同一任务。",
+                            "anyOf": [
+                              {
+                                "type": "null"
+                              },
+                              {
+                                "type": "string",
+                                "maxLength": 12000
+                              },
+                              {
+                                "type": "array",
+                                "maxItems": 32,
+                                "items": {
+                                  "type": "string",
+                                  "maxLength": 12000
+                                }
+                              }
+                            ]
+                          },
+                          "textAsset": {
+                            "title": "文字素材编号",
+                            "description": "按顺序播放，编号可用逗号或换行分隔，也可使用 JSON 数组；最多32条。",
+                            "anyOf": [
+                              {
+                                "type": "null"
+                              },
+                              {
+                                "type": "string",
+                                "maxLength": 8192
+                              },
+                              {
+                                "type": "array",
+                                "maxItems": 32,
+                                "items": {
+                                  "type": "string",
+                                  "maxLength": 128
+                                }
+                              }
+                            ]
+                          },
+                          "audioAsset": {
+                            "title": "音声素材编号",
+                            "description": "按顺序播放，编号可用逗号或换行分隔，也可使用 JSON 数组；最多32条。",
+                            "anyOf": [
+                              {
+                                "type": "null"
+                              },
+                              {
+                                "type": "string",
+                                "maxLength": 8192
+                              },
+                              {
+                                "type": "array",
+                                "maxItems": 32,
+                                "items": {
+                                  "type": "string",
+                                  "maxLength": 128
+                                }
+                              }
+                            ]
+                          },
+                          "cue": {
+                            "title": "语义动作编号",
+                            "description": "按顺序播放，编号可用逗号或换行分隔，也可使用 JSON 数组；最多32条。",
+                            "anyOf": [
+                              {
+                                "type": "null"
+                              },
+                              {
+                                "type": "string",
+                                "maxLength": 8192
+                              },
+                              {
+                                "type": "array",
+                                "maxItems": 32,
+                                "items": {
+                                  "type": "string",
+                                  "maxLength": 128
+                                }
+                              }
+                            ]
+                          },
+                          "readMs": {
+                            "type": "integer",
+                            "minimum": 1000,
+                            "maximum": 30000,
+                            "title": "每页阅读时间（毫秒，不低于全局下限）",
+                            "description": "可以延长每页停留，不能缩短设置中的每页最少阅读时间。完整显现后才开始计时。"
+                          },
+                          "animationAsset": {
+                            "title": "动画素材或片段编号",
+                            "description": "直接选择当前模型的动画片段，或唯一对应一个片段的动画素材编号。支持逗号/换行或数组；与语义动作并存时先播放语义动作，再播放本列表。",
+                            "anyOf": [
+                              {
+                                "type": "null"
+                              },
+                              {
+                                "type": "string",
+                                "maxLength": 8192
+                              },
+                              {
+                                "type": "array",
+                                "maxItems": 32,
+                                "items": {
+                                  "type": "string",
+                                  "maxLength": 128
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      "title": "生成失败时明确使用的固定后备"
+                    },
+                    "cue": {
+                      "type": "string",
+                      "maxLength": 128
+                    },
+                    "voice": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "mode": {
+                          "enum": [
+                            "off",
+                            "tts"
+                          ]
+                        },
+                        "presentationPolicy": {
+                          "enum": [
+                            "text-first",
+                            "speech-synchronized"
+                          ]
+                        }
+                      },
+                      "title": "生成回复的语音策略"
+                    },
+                    "animationAsset": {
+                      "title": "动画素材或片段编号",
+                      "description": "直接选择当前模型的动画片段，或唯一对应一个片段的动画素材编号。支持逗号/换行或数组；与语义动作并存时先播放语义动作，再播放本列表。",
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "string",
+                          "maxLength": 8192
+                        },
+                        {
+                          "type": "array",
+                          "maxItems": 32,
+                          "items": {
+                            "type": "string",
+                            "maxLength": 128
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  "title": "此状态的回复"
+                }
+              }
+            }
           }
         }
       },

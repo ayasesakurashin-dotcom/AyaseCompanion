@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {BubblePresenter,defaultBubblePreferences} from '../packages/presentation/bubble.ts';
 
-function fixture(){
+function fixture(readMs=1000){
   let clock=0,next=0;const timers=new Map<number,{at:number;fn:()=>void}>();
   const oldWindow=globalThis.window,oldPerformance=globalThis.performance,oldClear=globalThis.clearTimeout;
   Object.defineProperty(globalThis,'performance',{configurable:true,value:{now:()=>clock}});
@@ -17,8 +17,8 @@ function fixture(){
   const element=new Element(),text=new Element(),counter=new Element(),measure=new Element();
   const root=Object.assign(element,{querySelector:(s:string)=>s==='.bubble-text'?text:s==='.bubble-counter'?counter:measure});
   const bubble=new BubblePresenter(root as unknown as HTMLElement);
-  bubble.layout({x:100,y:300,width:100,height:100},{width:600,height:700},1,{...defaultBubblePreferences,animation:'none',readMs:1000});
-  return {bubble,root,text,timers,step(){const entry=[...timers].sort((a,b)=>a[1].at-b[1].at)[0];assert.ok(entry);timers.delete(entry[0]);clock=entry[1].at;entry[1].fn();},restore(){globalThis.window=oldWindow;globalThis.clearTimeout=oldClear;Object.defineProperty(globalThis,'performance',{configurable:true,value:oldPerformance});}};
+  bubble.layout({x:100,y:300,width:100,height:100},{width:600,height:700},1,{...defaultBubblePreferences,animation:'none',readMs});
+  return {bubble,root,text,timers,now:()=>clock,step(){const entry=[...timers].sort((a,b)=>a[1].at-b[1].at)[0];assert.ok(entry);timers.delete(entry[0]);clock=entry[1].at;entry[1].fn();},restore(){globalThis.window=oldWindow;globalThis.clearTimeout=oldClear;Object.defineProperty(globalThis,'performance',{configurable:true,value:oldPerformance});}};
 }
 
 test('多段文字独立分页与阅读，段间立即交接，仅最后一段关闭并完成',()=>{
@@ -45,5 +45,14 @@ test('明确取消撤销整组剩余文字，旧计时不能继续播放或完�
     f.bubble.startSequence(['new'],1000,()=>newDone++);
     while(f.timers.size)f.step();
     assert.equal(oldDone,0);assert.equal(newDone,1);
+  }finally{f.restore();}
+});
+test('每个短素材均遵守全局最少阅读时间，较小的条目readMs不能缩短',()=>{
+  const f=fixture(5000);try{
+    let done=0;f.bubble.startSequence(['甲','乙'],1000,()=>done++);
+    assert.equal(f.now(),0);assert.equal(f.text.textContent,'甲');
+    f.step();assert.equal(f.now(),5000);assert.equal(f.text.textContent,'乙');assert.equal(done,0);
+    f.step();assert.equal(f.now(),10000);assert.equal(f.root.dataset.phase,'closing');assert.equal(done,0);
+    f.step();assert.equal(done,1);
   }finally{f.restore();}
 });

@@ -419,6 +419,90 @@ pub(super) fn start(app: tauri::AppHandle, state: Shared) {
                 }
                 evidence.push(json!({"case":"fixed multi-material sequence shares text audio animation ownership; later important waits","passed":true,"channels":task.channels,"textSegments":task.plan["textSegments"],"clips":task.plan["clips"],"audioAcks":acks,"nextWaited":true}));
             }
+            let minimum_reading = {
+                let mut h = state.lock().unwrap();
+                let mut store = h.store.clone();
+                store.bubble.read_ms = 3000;
+                h.commit(store)?;
+                h.present(
+                    json!({"id":"minimum-reading","text":["甲","乙"],"readMs":1000}),
+                    "smoke.minimum-reading",
+                    Priority::Normal,
+                    false,
+                    120000,
+                    0,
+                )?
+            };
+            wait(&state, 20, |h| task_done(h, minimum_reading))?;
+            {
+                let mut h = state.lock().unwrap();
+                let task = h
+                    .scheduler
+                    .tasks
+                    .iter()
+                    .find(|t| t.id == minimum_reading)
+                    .unwrap();
+                let start = h
+                    .scheduler
+                    .log
+                    .iter()
+                    .find(|v| v["event"] == "started" && v["detail"]["taskId"] == minimum_reading)
+                    .and_then(|v| v["atMs"].as_u64())
+                    .ok_or("短文未开始")?;
+                let end = h
+                    .scheduler
+                    .log
+                    .iter()
+                    .find(|v| v["event"] == "finished" && v["detail"]["taskId"] == minimum_reading)
+                    .and_then(|v| v["atMs"].as_u64())
+                    .ok_or("短文未结束")?;
+                if task.status != Status::Completed || end - start < 6000 {
+                    return Err("短素材未遵守每段3000毫秒的全局阅读下限".into());
+                }
+                evidence.push(json!({"case":"every short fixed material honors global minimum despite smaller task readMs","passed":true,"globalReadMs":3000,"taskReadMs":1000,"textMaterials":2,"elapsedMs":end-start}));
+                let mut store = h.store.clone();
+                store.bubble.read_ms = 1000;
+                h.commit(store)?;
+            }
+            let routed = {
+                let mut h = state.lock().unwrap();
+                h.scheduler
+                    .claim("smoke.state", "music", Priority::Normal, false);
+                h.generate(json!({"mode":"state-specific","stateResponses":[{"id":"idle","base":"idle","response":{"mode":"fixed","variants":[{"id":"idle","text":"idle"}]}},{"id":"music","base":"music","response":{"mode":"fixed","variants":[{"id":"music","text":["music first","music second"],"animationAsset":["music_start","music_end"],"audioAsset":["smoke.recording","smoke.recording"],"readMs":1000}]}}]}),"smoke.routed",Priority::Normal,false,120000,0,None)?
+            };
+            wait(&state, 10, |h| {
+                h.scheduler
+                    .active()
+                    .is_some_and(|t| t.id == routed && t.status == Status::Presenting)
+            })?;
+            {
+                let mut h = state.lock().unwrap();
+                h.scheduler.claims.remove("smoke.state");
+            }
+            wait(&state, 40, |h| task_done(h, routed))?;
+            {
+                let mut h = state.lock().unwrap();
+                let task = h.scheduler.tasks.iter().find(|t| t.id == routed).unwrap();
+                if task.status != Status::Completed
+                    || task.plan["stateGuard"]["routeId"] != "music"
+                    || task.plan["clips"] != json!(["music_start", "music_end"])
+                    || task.channels.values().any(|v| v != "completed")
+                {
+                    return Err("状态专用回复、直接动画序列或开始后非抢占保护失败".into());
+                }
+                evidence.push(json!({"case":"state-specific fixed reply plays direct animation clips and survives later state change","passed":true,"stateGuard":task.plan["stateGuard"],"clips":task.plan["clips"],"channels":task.channels}));
+                h.scheduler
+                    .claim("smoke.state", "quiet", Priority::Important, false);
+                if h.select_response(
+                    &json!({"mode":"state-specific","stateResponses":[]}),
+                    "smoke.no-route",
+                )
+                .is_ok()
+                {
+                    return Err("无状态匹配时错误兜底".into());
+                }
+                h.scheduler.claims.remove("smoke.state");
+            }
             let hit_regions = crate::host::hit_testing::diagnostics(&app);
             if hit_regions["regionCount"].as_u64().unwrap_or(0) < 2
                 || hit_regions["updatedRecently"] != true
