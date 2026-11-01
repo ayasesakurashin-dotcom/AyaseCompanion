@@ -19,10 +19,13 @@ use std::{
 };
 use tauri::{Manager, State, WebviewWindow};
 use uuid::Uuid;
+mod appearance;
 mod hit_testing;
 mod p2;
 mod p3;
 mod responses;
+mod studio;
+mod updates;
 mod variants;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,6 +37,8 @@ struct Instance {
     overrides: Value,
     revisions: BTreeMap<String, u64>,
     previous_packages: Vec<String>,
+    #[serde(default)]
+    rollback_states: BTreeMap<String, updates::PackageState>,
     draft: String,
     runtime: Runtime,
     #[serde(default)]
@@ -63,10 +68,10 @@ impl BubblePreferences {
     fn validate(&self) -> Result<(), String> {
         if !["typewriter", "none"].contains(&self.animation.as_str())
             || !(10..=80).contains(&self.characters_per_second)
-            || !(12..=24).contains(&self.font_size)
-            || !(1000..=10000).contains(&self.read_ms)
+            || !(12..=48).contains(&self.font_size)
+            || !(1000..=30000).contains(&self.read_ms)
         {
-            return Err("气泡设置无效：字号 12—24，速度 10—80 字/秒，停留 1000—10000 毫秒".into());
+            return Err("气泡设置无效：字号 12—48，速度 10—80 字/秒，停留 1000—30000 毫秒".into());
         }
         Ok(())
     }
@@ -74,6 +79,10 @@ impl BubblePreferences {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Store {
+    #[serde(default)]
+    appearance: ayase_core::theme::Theme,
+    #[serde(default)]
+    appearance_source: Option<String>,
     active: Option<String>,
     instances: Vec<Instance>,
     library: Vec<PackageReport>,
@@ -87,6 +96,8 @@ struct Store {
 impl Default for Store {
     fn default() -> Self {
         Self {
+            appearance: Default::default(),
+            appearance_source: None,
             active: None,
             instances: vec![],
             library: vec![],
@@ -99,6 +110,7 @@ impl Default for Store {
     }
 }
 struct Host {
+    appearance_assets: BTreeMap<String, String>,
     root: PathBuf,
     db: Connection,
     store: Store,
@@ -225,7 +237,20 @@ impl Host {
                 .map_err(|_| "升级标记保存失败")?;
             }
         }
-        let store: Store = match stored {
+        if stored.is_ok() {
+            let backup = root.join("backups/before-p4-host.sqlite3");
+            if !backup.exists() {
+                fs::create_dir_all(backup.parent().unwrap()).map_err(|e| e.to_string())?;
+                db.execute("VACUUM INTO ?1", [backup.to_string_lossy().as_ref()])
+                    .map_err(|_| "P4 升级前档案备份失败，原档案保留")?;
+            }
+        }
+        let has_appearance = stored
+            .as_ref()
+            .ok()
+            .and_then(|t| serde_json::from_str::<Value>(t).ok())
+            .is_some_and(|v| v.get("appearance").is_some());
+        let mut store: Store = match stored {
             Ok(text) => serde_json::from_str(&text)
                 .map_err(|e| format!("本地档案不可读，已保留原数据：{e}"))?,
             Err(rusqlite::Error::QueryReturnedNoRows) => Store::default(),
@@ -236,7 +261,14 @@ impl Host {
         let env_settings = Arc::new(Mutex::new(environment::Settings::default()));
         env_settings.lock().unwrap().excluded = store.excluded.clone();
         let ai = p2::Ai::open(&root)?;
+        if !has_appearance {
+            store.appearance.font_size = store.bubble.font_size;
+            store.appearance.read_ms = store.bubble.read_ms;
+            store.appearance.characters_per_second = store.bubble.characters_per_second;
+            store.appearance.animation = store.bubble.animation.clone();
+        }
         let mut h = Self {
+            appearance_assets: BTreeMap::new(),
             root,
             db,
             store,
@@ -276,6 +308,7 @@ impl Host {
             }
         }
         h.scheduler.muted = h.store.muted;
+        h.load_appearance_assets();
         for i in &mut h.store.instances {
             for (key, value) in &mut i.runtime.state {
                 if key.starts_with("p3:") && key != "p3:budget" {
@@ -394,7 +427,13 @@ impl Host {
             .and_then(|i| i.overrides["extraPresets"].as_array())
             .cloned()
             .unwrap_or_default();
-        base.into_iter().chain(extra).collect()
+        let removed = self
+            .instance()
+            .and_then(|i| i.overrides["removedPresets"].as_array());
+        base.into_iter()
+            .chain(extra)
+            .filter(|p| !removed.is_some_and(|a| a.contains(&p["presetId"])))
+            .collect()
     }
     fn configured(&self) -> Vec<Configured> {
         let Some(i) = self.instance() else {
@@ -489,105 +528,18 @@ impl Host {
     fn resolve_variant(&self, v: &Value, owner: &str) -> Result<(Value, Vec<String>), String> {
         let p = self.package.as_ref().ok_or("请先激活角色包")?;
         let i = self.instance().ok_or("没有活动角色")?;
-        let mut plan = json!({"repeat":1});
-        if let Some(read_ms) = v["readMs"].as_u64() {
-            plan["readMs"] = json!(read_ms);
-        }
-        let mut channels = vec![];
-        let mut texts = plugin::material_values(&v["text"], false)?;
-        if texts.is_empty() {
-            texts = plugin::material_values(&v["textAsset"], true)?
-                .iter()
-                .filter_map(|id| p.asset_text(id))
-                .filter(|s| !s.trim().is_empty())
-                .collect();
-        }
-        if texts.iter().map(|s| s.chars().count()).sum::<usize>() > 12000 {
-            return Err("同一条回复的文字素材合计不能超过12000字".into());
-        }
-        let texts: Vec<_> = texts.into_iter().map(|s| s.replace("\r\n", "\n")).collect();
-        if !texts.is_empty() {
-            plan["text"] = json!(texts.join("\n"));
-            plan["textSegments"] = json!(texts);
-            channels.push("text".into());
-        }
-        let mut audio = vec![];
-        for id in plugin::material_values(&v["audioAsset"], true)? {
-            if let Some(path) = p.manifest["assets"][&id]["path"]
-                .as_str()
-                .filter(|_| self.asset_enabled(&id))
-            {
-                if p.manifest["assets"][&id]["kind"] == "audio"
-                    && p.files.contains_key(path)
-                    && !self.store.muted
-                {
-                    let path = self
-                        .root
-                        .join("packages")
-                        .join(&p.report.hash)
-                        .join("content")
-                        .join(path)
-                        .to_string_lossy()
-                        .into_owned();
-                    audio.push(
-                        json!({"path":path,"durationMs":p.manifest["assets"][&id]["durationMs"]}),
-                    );
-                }
-            }
-        }
-        if !audio.is_empty() {
-            plan["audioSegments"] = json!(audio);
-            plan["audioDone"] = json!(true);
-            channels.push("audio".into());
-        }
-        let mut clips = vec![];
-        for cue in plugin::material_values(&v["cue"], true)? {
-            let model = p.model.as_ref().unwrap();
-            let mapping = i.overrides["semanticCues"]
-                .get(&cue)
-                .or_else(|| model["semanticCues"].get(&cue));
-            if let Some(mapping) = mapping {
-                if let Some(clip) = mapping["clip"].as_str() {
-                    if model["clips"][clip].is_object() {
-                        clips.extend(std::iter::repeat_n(
-                            clip.to_owned(),
-                            mapping["repeat"].as_u64().unwrap_or(1).clamp(1, 8) as usize,
-                        ));
-                    }
-                }
-            }
-            // Explicit UI clip preview is represented as a host-only cue.
-            if owner == "host.user" && cue.starts_with("clip:") {
-                let clip = &cue[5..];
-                if model["clips"][clip].is_object() {
-                    clips.push(clip.to_owned());
-                }
-            }
-        }
-        let model = p.model.as_ref().unwrap();
-        for id in plugin::material_values(&v["animationAsset"], true)? {
-            let direct = id.strip_prefix("clip:").unwrap_or(&id);
-            if model["clips"][direct].is_object() {
-                clips.push(direct.to_owned());
-                continue;
-            }
-            let matches: Vec<_> = model["clips"]
-                .as_object()
-                .unwrap()
-                .iter()
-                .filter(|(_, clip)| clip["asset"] == id)
-                .map(|(name, _)| name.clone())
-                .collect();
-            if matches.len() > 1 {
-                return Err(format!("动画素材{id}对应多个片段，请选择具体片段编号"));
-            }
-            clips.extend(matches);
-        }
-        if !clips.is_empty() {
-            plan["clips"] = json!(clips);
-            channels.push("animation".into());
-        }
-        Ok((plan, channels))
+        ayase_core::presentation::resolve(
+            p,
+            &i.overrides,
+            self.store.muted,
+            &self
+                .root
+                .join("packages")
+                .join(&p.report.hash)
+                .join("content"),
+            v,
+            owner,
+        )
     }
     fn present(
         &mut self,
@@ -721,8 +673,8 @@ impl Host {
             facts.fullscreen_status = "采集超时 / 状态未知".into();
             facts.media_status = "采集超时 / 状态未知".into();
         }
-        json!({"version":"0.3.0","stage":"P3 · 已验收基线","p3":self.p3_snapshot(),"ai":self.ai_snapshot(),"instance":self.instance(),"instances":self.store.instances.iter().map(|i|json!({"id":i.id,"name":i.name,"packageHash":i.package_hash})).collect::<Vec<_>>(),"library":self.store.library,
-            "package":self.package.as_ref().map(|p|&p.report),"manifest":self.package.as_ref().map(|p|&p.manifest),"model":self.package.as_ref().and_then(|p|p.model.as_ref()),"assetPaths":asset_paths,
+        json!({"version":"0.4.0","stage":"P4 · 本机候选","p3":self.p3_snapshot(),"ai":self.ai_snapshot(),"instance":self.instance(),"instances":self.store.instances.iter().map(|i|json!({"id":i.id,"name":i.name,"packageHash":i.package_hash})).collect::<Vec<_>>(),"library":self.store.library,
+            "appearance":self.appearance_snapshot(),"package":self.package.as_ref().map(|p|&p.report),"manifest":self.package.as_ref().map(|p|&p.manifest),"model":self.package.as_ref().and_then(|p|p.model.as_ref()),"assetPaths":asset_paths,
             "plugins":plugins,"configured":known,"unknownPresets":unknown,"scheduler":self.scheduler.snapshot(),"facts":facts,"zoom":self.store.zoom,"bubble":self.store.bubble,"excluded":self.store.excluded,"dataDirectory":self.root.to_string_lossy()})
     }
 }
@@ -771,6 +723,11 @@ fn activate(h: &mut Host, hash: &str, mode: &str) -> Result<(), String> {
     if p.report.kind != "character" {
         return Err("请选择角色包".into());
     }
+    let update = if mode == "update" {
+        Some(updates::merged_overrides(h, &p, &[])?)
+    } else {
+        None
+    };
     let mut store = h.store.clone();
     let id;
     if mode == "update" {
@@ -782,8 +739,20 @@ fn activate(h: &mut Host, hash: &str, mode: &str) -> Result<(), String> {
         id = current.id.clone();
         let item = store.instances.iter_mut().find(|i| i.id == id).unwrap();
         if item.package_hash != hash {
+            item.rollback_states.insert(
+                item.package_hash.clone(),
+                updates::PackageState::capture(item),
+            );
             item.previous_packages.push(item.package_hash.clone());
             item.package_hash = hash.into();
+            if let Some((overrides, profile)) = update {
+                item.overrides = overrides;
+                item.profile = profile;
+                item.profile_revision += 1;
+                for r in item.revisions.values_mut() {
+                    *r += 1;
+                }
+            }
         }
     } else if mode == "new" {
         id = Uuid::new_v4().to_string();
@@ -794,6 +763,7 @@ fn activate(h: &mut Host, hash: &str, mode: &str) -> Result<(), String> {
             overrides: json!({"plugins":{},"extraPresets":[]}),
             revisions: BTreeMap::new(),
             previous_packages: vec![],
+            rollback_states: BTreeMap::new(),
             draft: String::new(),
             runtime: Runtime::default(),
             profile: None,
@@ -823,6 +793,9 @@ fn activate_package(
 ) -> Result<(), String> {
     control(&window)?;
     let mut h = state.lock().unwrap();
+    if mode == "update" {
+        return Err("请先预览包更新，再确认应用".into());
+    }
     activate(&mut h, &hash, &mode)?;
     allow_assets(&window.app_handle(), &h);
     Ok(())
@@ -864,11 +837,16 @@ fn rollback_package(window: WebviewWindow, state: State<Shared>) -> Result<(), S
         .and_then(|i| i.previous_packages.last())
         .ok_or("没有旧包可回退")?
         .clone();
-    activate(&mut h, &old, "update")?;
+    updates::rollback(&mut h, &old)?;
     allow_assets(window.app_handle(), &h);
     Ok(())
 }
 fn allow_assets(app: &tauri::AppHandle, h: &Host) {
+    if let Some(hash) = &h.store.appearance_source {
+        let _ = app
+            .asset_protocol_scope()
+            .allow_directory(h.root.join("packages").join(hash).join("content"), true);
+    }
     let _ = app
         .asset_protocol_scope()
         .allow_directory(h.root.join("audio-cache"), true);
@@ -1196,6 +1174,10 @@ fn user_control(
                 serde_json::from_value(value).map_err(|e| e.to_string())?;
             preferences.validate()?;
             let mut store = h.store.clone();
+            store.appearance.animation = preferences.animation.clone();
+            store.appearance.characters_per_second = preferences.characters_per_second;
+            store.appearance.font_size = preferences.font_size;
+            store.appearance.read_ms = preferences.read_ms;
             store.bubble = preferences;
             h.commit(store)?;
         }
@@ -1219,7 +1201,7 @@ fn user_control(
             let mut store = h.store.clone();
             store.zoom = z;
             h.commit(store)?;
-            resize_pet(window.app_handle(), z);
+            resize_pet(window.app_handle(), z, &h.store.appearance);
             clamp_pet(window.app_handle(), false);
         }
         "excluded" => {
@@ -1320,7 +1302,7 @@ fn clamp_pet(app: &tauri::AppHandle, reset: bool) {
         }
     }
 }
-fn resize_pet(app: &tauri::AppHandle, zoom: f64) {
+fn resize_pet(app: &tauri::AppHandle, zoom: f64, appearance: &ayase_core::theme::Theme) {
     let Some(pet) = app.get_webview_window("pet") else {
         return;
     };
@@ -1328,6 +1310,16 @@ fn resize_pet(app: &tauri::AppHandle, zoom: f64) {
     let scale = pet.scale_factor().unwrap_or(1.0);
     let mut width = (360.0 * zoom + 40.0).max(420.0);
     let mut height = 68.0 + 560.0 * zoom;
+    width += 2.0 * (appearance.offset_x as f64).abs();
+    height += (-(appearance.offset_y as f64)).max(0.0);
+    if let Some(max) = appearance.max_width {
+        width = width.max(max as f64 + 24.0 + 2.0 * (appearance.offset_x as f64).abs());
+    }
+    if let Some(max) = appearance.max_height {
+        height = height.max(
+            max as f64 + 68.0 + 280.0 * zoom + (-(appearance.offset_y as f64)).max(0.0) + 24.0,
+        );
+    }
     if let Ok(Some(monitor)) = pet.current_monitor() {
         width = width.min(monitor.work_area().size.width as f64 / scale);
         height = height.min(monitor.work_area().size.height as f64 / scale);
@@ -1419,7 +1411,7 @@ pub fn run() {
             h.app = Some(app.handle().clone());
             crate::p3::screen::start(app.handle());
             allow_assets(app.handle(), &h);
-            resize_pet(app.handle(), h.store.zoom);
+            resize_pet(app.handle(), h.store.zoom, &h.store.appearance);
             #[cfg(windows)]
             if let Some(pet) = app.get_webview_window("pet") {
                 h.env_settings.lock().unwrap().pet_hwnd = pet.hwnd()?.0 as isize;
@@ -1432,6 +1424,7 @@ pub fn run() {
                 environment::start(h.facts.clone(), h.env_settings.clone(), h.origin);
             }
             let shared = Arc::new(Mutex::new(h));
+            app.manage(studio::new(shared.lock().unwrap().root.join("authoring"))?);
             app.manage(shared.clone());
             hit_testing::start(app.handle());
             let app_handle = app.handle().clone();
@@ -1452,7 +1445,7 @@ pub fn run() {
                 .icon(tauri::image::Image::from_bytes(include_bytes!(
                     "../icons/icon.png"
                 ))?)
-                .tooltip("AyaseCompanion 0.3.0")
+                .tooltip("AyaseCompanion 0.4.0")
                 .menu(&menu)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => {
@@ -1475,7 +1468,9 @@ pub fn run() {
                 .build(app)?;
             clamp_pet(&app_handle, true);
             #[cfg(feature = "smoke-test")]
-            if std::env::var_os("AYASE_SMOKE_P2").is_some() {
+            if std::env::var_os("AYASE_SMOKE_P4").is_some() {
+                studio::smoke::start(app.handle().clone());
+            } else if std::env::var_os("AYASE_SMOKE_P2").is_some() {
                 p2::start_smoke(app.handle().clone(), app.state::<Shared>().inner().clone());
             } else {
                 smoke::start(app.handle().clone(), app.state::<Shared>().inner().clone());
@@ -1497,6 +1492,12 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            studio::studio_command,
+            studio::studio_snapshot,
+            studio::studio_ack,
+            appearance::appearance_settings,
+            updates::package_update,
+            updates::restore_recommended,
             hit_testing::pet_hit_regions,
             p3::prepare_screen,
             p3::capability_request,

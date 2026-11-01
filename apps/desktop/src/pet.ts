@@ -1,3 +1,4 @@
+import {displaySize} from '../../../packages/presentation/model.ts';
 import {invoke,convertFileSrc} from '@tauri-apps/api/core';
 import {getCurrentWindow} from '@tauri-apps/api/window';
 import {SpriteRenderer} from '../../../packages/presentation/sprite.ts';
@@ -27,7 +28,7 @@ export function setupPet(root:HTMLElement,bridge:PetBridge={invoke,assetUrl:conv
   let baseCurrent:BaseTransition|null=null,baseAckPending=false;
   const audio=new TaskAudioPlayer();let ackPending=false;
   let segmentPlaying=false,audioEnded=false,audioFailed=false,lastProgress=0,lastProgressText='';
-  const ack=(task:Task,channel:string,event:string)=>bridge.invoke<boolean>('presentation_ack',{id:task.id,generation:task.generation,channel,event,visualBase:channel==='animation'?canvas.dataset.base:undefined,visualKind:channel==='animation'?canvas.dataset.presentation:undefined});
+  const ack=(task:Task,channel:string,event:string)=>bridge.invoke<boolean>('presentation_ack',{instanceId:task.instanceId,id:task.id,generation:task.generation,channel,event,visualBase:channel==='animation'?canvas.dataset.base:undefined,visualKind:channel==='animation'?canvas.dataset.presentation:undefined});
   const clear=(preserveBase=false)=>{epoch++;bubble.cancel();audio.stop();segmentPlaying=false;audioEnded=false;audioFailed=false;lastProgress=0;lastProgressText='';if(!preserveBase){renderer.cancel();baseCurrent=null;}current=null;};
   const streamAudio=(task:Task)=>{
     if(audioEnded||segmentPlaying||task.channels.audio!=='pending'||!task.plan.audioDone)return;
@@ -44,10 +45,10 @@ export function setupPet(root:HTMLElement,bridge:PetBridge={invoke,assetUrl:conv
     });
   };
   const startBase=async(transition:BaseTransition)=>{
-    baseAckPending=true;
-    const baseAck=(event:string)=>bridge.invoke<boolean>('base_transition_ack',{id:transition.id,generation:transition.generation,event,visualKind:canvas.dataset.presentation});
+    baseAckPending=true;const grantEpoch=epoch;
+    const baseAck=(event:string)=>bridge.invoke<boolean>('base_transition_ack',{instanceId:transition.instanceId,id:transition.id,generation:transition.generation,event,visualKind:canvas.dataset.presentation});
     try{
-      if(!await baseAck('started'))return;
+      if(!await baseAck('started')||epoch!==grantEpoch)return;
       baseCurrent=transition;
       const alive=()=>baseCurrent?.id===transition.id&&baseCurrent.generation===transition.generation;
       try{renderer.playFinite(transition.clips,1,()=>{if(alive())void baseAck('completed');},true);}
@@ -55,11 +56,11 @@ export function setupPet(root:HTMLElement,bridge:PetBridge={invoke,assetUrl:conv
     }finally{baseAckPending=false;}
   };
   const start=async(task:Task)=>{
-    ackPending=true;
+    ackPending=true;const grantEpoch=epoch;
     try{
       // Authorization precedes any output. Every async continuation additionally
       // checks this local generation, including decode, page and audio callbacks.
-      const valid=await ack(task,'','started');if(!valid)return;
+      const valid=await ack(task,'','started');if(!valid||epoch!==grantEpoch)return;
       clear();current=task;const own=epoch;const alive=()=>epoch===own&&current?.id===task.id;
       const done=(c:string,failed=false)=>{if(alive())void ack(task,c,failed?'failed':'completed');};
       const plan=task.plan;
@@ -90,7 +91,7 @@ export function setupPet(root:HTMLElement,bridge:PetBridge={invoke,assetUrl:conv
     const key=s.instance&&s.package?`${s.instance.id}:${s.package.hash}`:'';
     (root.querySelector('.pet-empty') as HTMLElement).hidden=!!key;
     if(!key){if(loaded){clear();renderer.dispose();loaded='';}void regions(s);return;}
-    const width=360*s.zoom,height=280*s.zoom;canvas.style.width=`${width}px`;canvas.style.height=`${height}px`;
+    const {width,height}=displaySize(s.model!.logicalSize,s.zoom);canvas.style.width=`${width}px`;canvas.style.height=`${height}px`;
     if(key!==loaded){if(loading)return;loading=true;clear();
       try{await renderer.load(s.model!,Object.fromEntries(Object.entries(s.assetPaths).map(([id,path])=>[id,bridge.assetUrl(path)])));loaded=key;await bridge.invoke('renderer_ready',{instanceId:s.instance!.id,packageHash:s.package!.hash});}
       catch(e){(root.querySelector('.pet-empty') as HTMLElement).hidden=false;root.querySelector('.pet-empty')!.textContent=String(e);}
@@ -98,7 +99,8 @@ export function setupPet(root:HTMLElement,bridge:PetBridge={invoke,assetUrl:conv
     }
     const reference=renderer.referenceBounds(),box=canvas.getBoundingClientRect(),shell=root.getBoundingClientRect();
     const sx=width/s.model!.logicalSize.width,sy=height/s.model!.logicalSize.height;
-    bubble.layout({x:box.x-shell.x+reference.x*sx,y:box.y-shell.y+reference.y*sy,width:reference.width*sx,height:reference.height*sy},{width:shell.width,height:shell.height},s.zoom,s.bubble??defaultBubblePreferences);
+    const appearance=s.appearance?.settings,background=appearance?.backgroundAsset?s.appearance?.assetPaths[appearance.backgroundAsset]:undefined;
+    bubble.layout({x:box.x-shell.x+reference.x*sx+reference.width*sx*(s.model!.anchors.bubble.x-.5),y:box.y-shell.y+reference.y*sy+reference.height*sy*s.model!.anchors.bubble.y,width:reference.width*sx,height:reference.height*sy},{width:shell.width,height:shell.height},s.zoom,s.bubble??defaultBubblePreferences,appearance,background?bridge.assetUrl(background):undefined);
     renderer.applyBase(s.scheduler.appliedBase);
     const base=s.scheduler.baseTransition;
     if(baseCurrent&&(!base||base.id!==baseCurrent.id||base.generation!==baseCurrent.generation)){

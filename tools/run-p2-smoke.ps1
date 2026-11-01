@@ -3,7 +3,7 @@ $ErrorActionPreference='Stop'
 $projectRoot=Split-Path $PSScriptRoot -Parent
 $package=(Resolve-Path -LiteralPath $PackagePath).Path
 $evidence=Join-Path $projectRoot ('artifacts/p2-native-'+[Guid]::NewGuid().ToString('N'))
-$names=@('AYASE_TEST_DATA_DIR','AYASE_SMOKE_PACKAGE','AYASE_SMOKE_P2','WEBVIEW2_USER_DATA_FOLDER')
+$names=@('AYASE_TEST_DATA_DIR','AYASE_SMOKE_PACKAGE','AYASE_SMOKE_P2','WEBVIEW2_USER_DATA_FOLDER','AYASE_SMOKE_P4','AYASE_SMOKE_MEDIA','AYASE_SMOKE_BASE_RESTORE')
 $previous=@{}
 foreach($name in $names){$previous[$name]=[Environment]::GetEnvironmentVariable($name)}
 Push-Location $projectRoot
@@ -15,6 +15,9 @@ try{
   $env:AYASE_TEST_DATA_DIR=$evidence
   $env:AYASE_SMOKE_PACKAGE=$package
   $env:AYASE_SMOKE_P2='1'
+  $env:AYASE_SMOKE_P4=$null
+  $env:AYASE_SMOKE_MEDIA=$null
+  $env:AYASE_SMOKE_BASE_RESTORE=$null
   $env:WEBVIEW2_USER_DATA_FOLDER=Join-Path $evidence 'webview'
   $process=Start-Process -FilePath './target/debug/ayase-companion.exe' -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $evidence 'stdout.log') -RedirectStandardError (Join-Path $evidence 'stderr.log')
   for($step=0;$step -lt 30;$step++){if($process.WaitForExit(5000)){break}}

@@ -32,3 +32,5 @@ export function paginate(text:string,limit=72):string[]{
   const pages:string[]=[];for(let i=0;i<chars.length;i+=limit)pages.push(chars.slice(i,i+limit).join(''));
   return pages;
 }
+
+export function displaySize(logical:{width:number;height:number},zoom:number){const factor=Math.min(360/logical.width,280/logical.height)*zoom;return {width:logical.width*factor,height:logical.height*factor};}

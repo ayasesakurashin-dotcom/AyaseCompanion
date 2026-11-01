@@ -22,6 +22,35 @@ fn work_threshold_rest_and_activity_accept_twelve_hours() {
     assert!(!make(86_401).enabled);
 }
 #[test]
+fn simulator_uses_real_capped_ticks_and_weather_fact_fields() {
+    let mut c = config("work-reminder");
+    c.config["thresholdSeconds"] = json!(10);
+    c.config["basis"] = json!("manual");
+    let input = Input {
+        monotonic_ms: 9_000,
+        idle_seconds: Some(0),
+        manual_work: true,
+        ..Default::default()
+    };
+    assert!(simulate("work-reminder", &c, input.clone(), wall()).is_none());
+    assert!(simulate(
+        "work-reminder",
+        &c,
+        Input {
+            monotonic_ms: 10_000,
+            ..input
+        },
+        wall()
+    )
+    .is_some());
+    let c = config("weather-care");
+    let input = Input {
+        weather: Some(json!({"city":"模拟地点","temperature":20,"code":61})),
+        ..Default::default()
+    };
+    assert!(simulate("weather-care", &c, input, wall()).is_some());
+}
+#[test]
 fn work_counter_distinguishes_manual_pause_idle_rest_and_suspend() {
     let mut c = config("work-reminder");
     c.config["thresholdSeconds"] = json!(3);

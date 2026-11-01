@@ -1,1 +1,207 @@
-{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","required":["format","formatVersion"],"properties":{"format":{"const":"ayase.theme"},"formatVersion":{"const":"1.0"},"foreground":{"type":"string","pattern":"^#[0-9a-fA-F]{6}$"},"background":{"type":"string","pattern":"^#[0-9a-fA-F]{6}$"},"fontSize":{"type":"integer","minimum":12,"maximum":48},"maxWidth":{"type":"integer","minimum":160,"maximum":600}}}
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "formatVersion"
+  ],
+  "properties": {
+    "format": {
+      "const": "ayase.theme"
+    },
+    "formatVersion": {
+      "const": "1.0"
+    },
+    "displayName": {
+      "type": "string",
+      "maxLength": 160
+    },
+    "foreground": {
+      "type": "string",
+      "pattern": "^#[0-9a-fA-F]{6}$"
+    },
+    "background": {
+      "type": "string",
+      "pattern": "^#[0-9a-fA-F]{6}$"
+    },
+    "borderColor": {
+      "type": "string",
+      "pattern": "^#[0-9a-fA-F]{6}$"
+    },
+    "fillOpacity": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "borderRadius": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 40
+    },
+    "tailSize": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 32
+    },
+    "tailX": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "fontSize": {
+      "type": "integer",
+      "minimum": 12,
+      "maximum": 48
+    },
+    "charactersPerSecond": {
+      "type": "integer",
+      "minimum": 10,
+      "maximum": 80
+    },
+    "readMs": {
+      "type": "integer",
+      "minimum": 1000,
+      "maximum": 30000
+    },
+    "offsetX": {
+      "type": "integer",
+      "minimum": -1600,
+      "maximum": 1600
+    },
+    "offsetY": {
+      "type": "integer",
+      "minimum": -1600,
+      "maximum": 1600
+    },
+    "inputOpacity": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "paddingTop": {
+      "type": "integer",
+      "minimum": 4,
+      "maximum": 80
+    },
+    "paddingRight": {
+      "type": "integer",
+      "minimum": 4,
+      "maximum": 80
+    },
+    "paddingBottom": {
+      "type": "integer",
+      "minimum": 4,
+      "maximum": 80
+    },
+    "paddingLeft": {
+      "type": "integer",
+      "minimum": 4,
+      "maximum": 80
+    },
+    "sliceTop": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 500
+    },
+    "sliceRight": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 500
+    },
+    "sliceBottom": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 500
+    },
+    "sliceLeft": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 500
+    },
+    "fontFamily": {
+      "enum": [
+        "Microsoft YaHei",
+        "Segoe UI",
+        "Arial",
+        "Yu Gothic",
+        "Meiryo"
+      ]
+    },
+    "animation": {
+      "enum": [
+        "typewriter",
+        "none"
+      ]
+    },
+    "maxWidth": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "integer",
+          "minimum": 80,
+          "maximum": 1600
+        }
+      ]
+    },
+    "maxHeight": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "integer",
+          "minimum": 80,
+          "maximum": 1600
+        }
+      ]
+    },
+    "backgroundAsset": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "maxLength": 128
+        }
+      ]
+    },
+    "assets": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "kind",
+          "path"
+        ],
+        "properties": {
+          "kind": {
+            "const": "image"
+          },
+          "path": {
+            "type": "string",
+            "maxLength": 240
+          }
+        }
+      }
+    },
+    "themeId": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{1,127}$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "integrity": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      }
+    }
+  }
+}

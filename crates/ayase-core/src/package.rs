@@ -126,6 +126,44 @@ pub fn json_file(files: &BTreeMap<String, Vec<u8>>, path: &str) -> Result<Value,
 pub fn validate(bytes: &[u8]) -> Result<Package, String> {
     let files = read_zip(bytes)?;
     let is_character = files.contains_key("manifest.json");
+    if files.contains_key("theme.json") {
+        if is_character || files.contains_key("plugin.json") {
+            return Err("主题入口不能与角色/插件入口混用".into());
+        }
+        let manifest = json_file(&files, "theme.json")?;
+        if let Some(integrity) = manifest["integrity"].as_object() {
+            for (path, hash) in integrity {
+                safe_path(path)?;
+                if files
+                    .get(path)
+                    .is_none_or(|b| Some(digest(b)) != hash.as_str().map(str::to_owned))
+                {
+                    return Err("主题完整性散列不匹配".into());
+                }
+            }
+        }
+        no_private_fields(&manifest)?;
+        crate::theme::parse(&manifest, &files)?;
+        let report = PackageReport {
+            kind: "theme".into(),
+            id: manifest["themeId"].as_str().unwrap_or("local.theme").into(),
+            version: manifest["version"].as_str().unwrap_or("1.0.0").into(),
+            display_name: manifest["displayName"]
+                .as_str()
+                .unwrap_or("气泡主题")
+                .into(),
+            warnings: vec![],
+            hash: digest(bytes),
+            file_count: files.len(),
+            expanded_bytes: files.values().map(|v| v.len() as u64).sum(),
+        };
+        return Ok(Package {
+            files,
+            manifest,
+            model: None,
+            report,
+        });
+    }
     if is_character && files.contains_key("plugin.json") {
         return Err("角色和插件入口不能混用".into());
     }
@@ -230,6 +268,13 @@ pub fn validate(bytes: &[u8]) -> Result<Package, String> {
             warnings.push(format!("基础姿态 {name} 缺少可用循环，降级到 idle"));
         }
         model = Some(m);
+        if let Some(path) = manifest["recommendedTheme"].as_str() {
+            if let Err(e) =
+                json_file(&files, path).and_then(|v| crate::theme::parse(&v, &files).map(|_| ()))
+            {
+                warnings.push(format!("推荐主题不可用，继续使用全局主题：{e}"));
+            }
+        }
         let mut ids = BTreeSet::new();
         if let Some(presets) = manifest["pluginPresets"].as_array() {
             for p in presets {
@@ -329,7 +374,7 @@ fn validate_layout(c: &Value, w: u32, h: u32) -> Result<(), String> {
     }
     Ok(())
 }
-fn no_private_fields(v: &Value) -> Result<(), String> {
+pub fn no_private_fields(v: &Value) -> Result<(), String> {
     match v {
         Value::Object(o) => {
             for (k, v) in o {

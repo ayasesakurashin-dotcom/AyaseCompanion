@@ -1,3 +1,4 @@
+import {applyAppearance,defaultAppearance,type Appearance} from './appearance.ts';
 export interface BubblePreferences {
   animation: 'typewriter' | 'none';
   charactersPerSecond: number;
@@ -8,15 +9,18 @@ export const defaultBubblePreferences: BubblePreferences = {
   animation: 'typewriter', charactersPerSecond: 30, fontSize: 15, readMs: 2800,
 };
 export interface Bounds { x: number; y: number; width: number; height: number }
-export function bubbleGeometry(reference: Bounds, viewport: {width:number;height:number}, zoom:number) {
+export function bubbleGeometry(reference: Bounds, viewport: {width:number;height:number}, zoom:number,settings:Partial<Appearance>={}) {
+  const a={...defaultAppearance,...settings};
   const gap = 12 * zoom;
-  const bottom = viewport.height - reference.y + gap;
-  const width = Math.max(48, Math.min(viewport.width - 24, Math.max(148, reference.width * 1.65)));
+  const custom=a.offsetY!==0||a.maxHeight!==null;
+  const anchor=custom?Math.max(Math.min(100,viewport.height-12),Math.min(viewport.height-12,reference.y-gap+a.offsetY)):reference.y-gap;
+  const bottom = viewport.height-anchor;
+  const width = Math.max(48, Math.min(viewport.width - 24, a.maxWidth??Math.max(148, reference.width * 1.65)));
   return {
     width,
-    maxHeight: Math.max(0, Math.min(reference.height, reference.y - gap - 12)),
+    maxHeight: Math.max(0, Math.min(a.maxHeight??reference.height, anchor-12)),
     bottom,
-    center: Math.max(width / 2 + 12, Math.min(viewport.width - width / 2 - 12, reference.x + reference.width / 2)),
+    center: Math.max(width / 2 + 12, Math.min(viewport.width - width / 2 - 12, reference.x + reference.width / 2+a.offsetX)),
   };
 }
 export function graphemes(text:string):string[] {
@@ -62,6 +66,8 @@ export class BubblePresenter {
   private progress:((text:string)=>void)|null=null;
   private remaining:string[]=[];
   private completedText='';
+  private appearance=defaultAppearance;
+  private geometry={width:260,viewportWidth:420,targetCenter:210};
 
   private element:HTMLElement;
   constructor(element:HTMLElement){
@@ -71,17 +77,19 @@ export class BubblePresenter {
     this.counter=element.querySelector('.bubble-counter')!;
     this.measure=element.querySelector('.bubble-measure')!;
   }
-  layout(reference:Bounds,viewport:{width:number;height:number},zoom:number,preferences:BubblePreferences){
-    const geometry=bubbleGeometry(reference,viewport,zoom);
-    const signature=JSON.stringify([geometry,preferences]);
+  layout(reference:Bounds,viewport:{width:number;height:number},zoom:number,preferences:BubblePreferences,appearance:Partial<Appearance>={},backgroundUrl?:string){
+    const geometry=bubbleGeometry(reference,viewport,zoom,appearance);
+    const signature=JSON.stringify([geometry,preferences,appearance,backgroundUrl]);
     if(signature===this.signature)return;
     this.signature=signature;this.preferences={...preferences};
+    this.appearance=applyAppearance(this.element,appearance,backgroundUrl);
+    this.geometry={width:geometry.width,viewportWidth:viewport.width,targetCenter:reference.x+reference.width/2+this.appearance.offsetX};
     this.element.style.width=`${geometry.width}px`;
     this.element.style.left=`${geometry.center}px`;
     this.element.style.bottom=`${geometry.bottom}px`;
     this.element.style.maxHeight=`${geometry.maxHeight}px`;
     this.element.style.setProperty('--bubble-font-size',`${preferences.fontSize}px`);
-    this.maxTextHeight=geometry.maxHeight-44;
+    this.maxTextHeight=geometry.maxHeight-this.appearance.paddingTop-this.appearance.paddingBottom-20;
     if(this.done&&!this.waiting&&this.phase!=='closing')this.showPage(true);
   }
   start(text:string,readMs:number|undefined,done:(failed?:boolean)=>void,progress?:((text:string)=>void)){
@@ -116,6 +124,14 @@ export class BubblePresenter {
     clearTimeout(this.timer);++this.generation;
     this.element.classList.remove('hidden','closing');
     this.element.style.height='auto';
+    const maxTextWidth=Math.max(1,this.geometry.width-this.appearance.paddingLeft-this.appearance.paddingRight-2);
+    this.measure.style.width='max-content';this.measure.style.maxWidth=`${maxTextWidth}px`;this.measure.style.left='0';this.measure.style.right='auto';
+    this.measure.textContent=this.all.slice(this.pageStart).join('');
+    const measuredWidth=this.measure.getBoundingClientRect().width;
+    const width=Math.min(this.geometry.width,Math.max(80,(Number.isFinite(measuredWidth)?measuredWidth:maxTextWidth)+this.appearance.paddingLeft+this.appearance.paddingRight+2));
+    this.element.style.width=`${width}px`;
+    this.element.style.left=`${Math.max(width/2+12,Math.min(this.geometry.viewportWidth-width/2-12,this.geometry.targetCenter))}px`;
+    this.measure.style.width=`${Math.max(1,width-this.appearance.paddingLeft-this.appearance.paddingRight-2)}px`;
     // An impossibly small viewport is a channel failure, never an indefinite task lock.
     if(this.maxTextHeight<this.preferences.fontSize*1.65){
       const done=this.done;this.cancel();console.warn('气泡空间不足，请缩小模型或字号');done?.(true);return;

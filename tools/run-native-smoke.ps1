@@ -8,6 +8,8 @@ $oldPackage=$env:AYASE_SMOKE_PACKAGE
 $oldWebView=$env:WEBVIEW2_USER_DATA_FOLDER
 $oldMedia=$env:AYASE_SMOKE_MEDIA
 $oldBase=$env:AYASE_SMOKE_BASE_RESTORE
+$oldP4=$env:AYASE_SMOKE_P4
+$oldP2=$env:AYASE_SMOKE_P2
 if($SelfMedia -and $BaseRestore){throw 'SelfMedia 与 BaseRestore 请分别运行'}
 Push-Location $projectRoot
 try{
@@ -17,6 +19,8 @@ try{
   New-Item -ItemType Directory -Path $evidence | Out-Null
   $env:AYASE_TEST_DATA_DIR=$evidence
   $env:AYASE_SMOKE_PACKAGE=$resolvedPackage
+  $env:AYASE_SMOKE_P4=$null
+  $env:AYASE_SMOKE_P2=$null
   $env:WEBVIEW2_USER_DATA_FOLDER=Join-Path $evidence 'webview'
   if($SelfMedia){$env:AYASE_SMOKE_MEDIA='1'}else{$env:AYASE_SMOKE_MEDIA=$null}
   if($BaseRestore){$env:AYASE_SMOKE_BASE_RESTORE='1'}else{$env:AYASE_SMOKE_BASE_RESTORE=$null}
@@ -35,5 +39,7 @@ try{
   $env:WEBVIEW2_USER_DATA_FOLDER=$oldWebView
   $env:AYASE_SMOKE_MEDIA=$oldMedia
   $env:AYASE_SMOKE_BASE_RESTORE=$oldBase
+  $env:AYASE_SMOKE_P4=$oldP4
+  $env:AYASE_SMOKE_P2=$oldP2
   Pop-Location
 }

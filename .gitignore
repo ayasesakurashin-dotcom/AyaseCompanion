@@ -28,3 +28,5 @@ docs/P[0-9]*-专项*.md
 *.dmp
 ayase-diagnostics-*.json
 codex-clipboard-*.png
+
+*.aytheme

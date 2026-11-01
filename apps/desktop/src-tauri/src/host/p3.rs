@@ -547,9 +547,8 @@ pub(super) fn p3_action(
             let wall = DateTime::parse_from_rfc3339(value["wall"].as_str().unwrap_or(""))
                 .map_err(|_| "模拟时刻需要含时区")?
                 .with_timezone(&Utc);
-            let mut state = BTreeMap::new();
-            let mut input = behavior::Input {
-                monotonic_ms: 0,
+            let input = behavior::Input {
+                monotonic_ms: value["elapsedSeconds"].as_u64().unwrap_or(4000).min(86400) * 1000,
                 idle_seconds: Some(0),
                 manual_work: true,
                 pointer: Some(("double".into(), String::new())),
@@ -558,16 +557,7 @@ pub(super) fn p3_action(
                 special: value["special"].as_array().cloned().unwrap_or_default(),
                 ..Default::default()
             };
-            let _ = behavior::evaluate(&kind, &c, &input, wall, 0., &mut state);
-            input.monotonic_ms = value["elapsedSeconds"].as_u64().unwrap_or(4000).min(86400) * 1000;
-            // Deterministic virtual ticks preserve the same capped work accounting as real ticks.
-            let max = input.monotonic_ms;
-            for ms in (1000..max).step_by(1000) {
-                input.monotonic_ms = ms;
-                let _ = behavior::evaluate(&kind, &c, &input, wall, 0., &mut state);
-            }
-            input.monotonic_ms = max;
-            let result = behavior::evaluate(&kind, &c, &input, wall, 0., &mut state);
+            let result = behavior::simulate(&kind, &c, input, wall);
             return Ok(
                 json!({"eligible":result.is_some(),"response":result.as_ref().map(|r|&r.response),"facts":result.as_ref().map(|r|&r.facts),"note":"仅计算模拟结果；未截图、联网、呈现或修改实际计时"}),
             );

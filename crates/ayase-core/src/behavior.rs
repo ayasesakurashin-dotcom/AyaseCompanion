@@ -25,6 +25,25 @@ pub struct Candidate {
     pub proactive: bool,
     pub key: String,
 }
+/// The host's read-only simulator and Studio use identical deterministic ticks.
+/// Supplied facts stay local and no accepted budget/dedupe state is persisted.
+pub fn simulate(
+    kind: &str,
+    c: &Configured,
+    mut input: Input,
+    wall: DateTime<Utc>,
+) -> Option<Candidate> {
+    let max = input.monotonic_ms.min(86_400_000);
+    let mut state = BTreeMap::new();
+    input.monotonic_ms = 0;
+    let _ = evaluate(kind, c, &input, wall, 0., &mut state);
+    for ms in (1000..max).step_by(1000) {
+        input.monotonic_ms = ms;
+        let _ = evaluate(kind, c, &input, wall, 0., &mut state);
+    }
+    input.monotonic_ms = max;
+    evaluate(kind, c, &input, wall, 0., &mut state)
+}
 pub fn in_window(minute: u32, start: &str, end: &str) -> bool {
     let parse =
         |s: &str| s[..2].parse::<u32>().unwrap_or(0) * 60 + s[3..].parse::<u32>().unwrap_or(0);
