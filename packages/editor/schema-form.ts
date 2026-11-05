@@ -1,5 +1,5 @@
 type Json=Record<string,any>;
-export interface FormOptions{model?:{clips:Record<string,{asset:string}>}|null;labels?:Record<string,string>}
+export interface FormOptions{model?:{clips:Record<string,{asset:string}>}|null;labels?:Record<string,string>;collapsible?:boolean;foldState?:Map<string,boolean>}
 export function schemaDefaults(schema:Json):any{
  if(schema.default!==undefined)return structuredClone(schema.default);if(schema.const!==undefined)return schema.const;
  if(schema.properties?.mode?.enum?.includes('generated-with-fallback')&&schema.properties?.variants)return {mode:'fixed',variants:[]};
@@ -16,11 +16,16 @@ export function schemaBranch(branches:Json[],value:any):number{
 }
 export function renderSchemaForm(container:HTMLElement,root:Json,initial:any,onChange:(v:any)=>void,options:FormOptions={}){
  const defs:Json={};const gather=(s:any)=>{if(!s||typeof s!=='object')return;if(s.$defs)Object.assign(defs,s.$defs);Object.values(s).forEach(gather);};gather(root);root={...root,$defs:defs};
- const prefix='form-'+crypto.randomUUID();let value=structuredClone(initial);let seq=0;
- function draw(){container.replaceChildren();field(root,value,'参数',v=>{value=v;onChange(v);},container,0);}
- function field(raw:Json,current:any,key:string,change:(v:any)=>void,parent:HTMLElement,depth:number){
-  let schema=resolveSchema(raw,root);const wrap=document.createElement('div');wrap.className='field';parent.append(wrap);
-  const label=document.createElement('label');label.id=`${prefix}-${++seq}`;label.textContent=schema.title??options.labels?.[key]??key;wrap.append(label);
+ const prefix='form-'+crypto.randomUUID(),folds=options.foldState??new Map<string,boolean>();let value=structuredClone(initial);let seq=0;
+ const part=(key:string)=>key.replaceAll('~','~0').replaceAll('/','~1');
+ const brief=(v:any)=>v===null||v===undefined?'自动 / 未指定':Array.isArray(v)?`${v.length} 项`:typeof v==='object'?`${Object.keys(v).length} 个字段`:typeof v==='boolean'?(v?'已开启':'已关闭'):String(v).replace(/\s+/g,' ').slice(0,64)||'未填写';
+ function remember(){container.querySelectorAll<HTMLDetailsElement>('[data-field-path]').forEach(el=>folds.set(el.dataset.fieldPath!,el.open));}
+ function draw(){if(options.collapsible)remember();container.replaceChildren();if(options.collapsible){const tools=document.createElement('div');tools.className='schema-fold-actions actions';for(const [text,open]of [['展开全部参数',true],['折叠全部参数',false]] as const){const button=document.createElement('button');button.type='button';button.textContent=text;button.onclick=()=>container.querySelectorAll<HTMLDetailsElement>('[data-field-path]').forEach(el=>{el.open=open;folds.set(el.dataset.fieldPath!,open);});tools.append(button);}container.append(tools);}field(root,value,'参数',v=>{value=v;onChange(v);},container,0,'');}
+ function field(raw:Json,current:any,key:string,change:(v:any)=>void,parent:HTMLElement,depth:number,path:string){
+  let schema=resolveSchema(raw,root);const outer=document.createElement(options.collapsible?'details':'div');outer.className=options.collapsible?'field schema-fold':'field';parent.append(outer);
+  const label=document.createElement(options.collapsible?'span':'label');label.id=`${prefix}-${++seq}`;label.textContent=schema.title??options.labels?.[key]??key;
+  let wrap:HTMLElement=outer;
+  if(options.collapsible){const details=outer as HTMLDetailsElement,summary=document.createElement('summary'),status=document.createElement('small');details.dataset.fieldPath=path;details.open=folds.get(path)??(depth===0||!(schema.type==='object'||schema.type==='array'||Array.isArray(current)||(current&&typeof current==='object')));status.textContent=brief(current);summary.append(label,status);wrap=document.createElement('div');wrap.className='schema-fold-body';details.append(summary,wrap);details.ontoggle=()=>{if(details.isConnected)folds.set(path,details.open);};const commit=change;change=v=>{status.textContent=brief(v);commit(v);};}else wrap.append(label);
   const hint=()=>{if(schema.description){const small=document.createElement('small');small.textContent=schema.description;wrap.append(small);}};
   if(depth>24){wrap.append(document.createTextNode('配置嵌套过深'));return;}
   if(schema.anyOf){const nullable=schema.anyOf.some((s:Json)=>s.type==='null');const branches=schema.anyOf.filter((s:Json)=>s.type!=='null');
@@ -37,16 +42,16 @@ export function renderSchemaForm(container:HTMLElement,root:Json,initial:any,onC
    const obj=current&&typeof current==='object'&&!Array.isArray(current)?structuredClone(current):{};const group=document.createElement('fieldset');wrap.append(group);const reply=schema.properties?.mode?.enum?.includes('generated-with-fallback')&&schema.properties?.variants;
    for(const[k,s]of Object.entries(schema.properties??{})){
     if(reply&&((obj.mode==='state-specific'&&!['mode','stateResponses'].includes(k))||(obj.mode!=='state-specific'&&(k==='stateResponses'||(k==='variants'&&obj.mode!=='fixed')||(k==='fallback'&&obj.mode!=='generated-with-fallback')||(['intent','voice','cue','animationAsset'].includes(k)&&obj.mode==='fixed')))))continue;
-    field(s as Json,obj[k]===undefined?schemaDefaults(s as Json):obj[k],k,v=>{obj[k]=v;if(reply&&k==='mode'){for(const name of ['variants','fallback'])if(Array.isArray(obj[name])&&!obj[name].length)delete obj[name];if(!obj.intent)delete obj.intent;if(v==='state-specific')obj.stateResponses??=[];else if(v==='fixed')obj.variants??=[];else{obj.intent??='';if(v==='generated-with-fallback')obj.fallback??=[];}}change(obj);if(reply&&k==='mode')draw();},group,depth+1);
+    field(s as Json,obj[k]===undefined?schemaDefaults(s as Json):obj[k],k,v=>{obj[k]=v;if(reply&&k==='mode'){for(const name of ['variants','fallback'])if(Array.isArray(obj[name])&&!obj[name].length)delete obj[name];if(!obj.intent)delete obj.intent;if(v==='state-specific')obj.stateResponses??=[];else if(v==='fixed')obj.variants??=[];else{obj.intent??='';if(v==='generated-with-fallback')obj.fallback??=[];}}change(obj);if(reply&&k==='mode')draw();},group,depth+1,`${path}/${part(k)}`);
    }
    if(schema.additionalProperties&&schema.additionalProperties!==false){
     const extra=typeof schema.additionalProperties==='object'?schema.additionalProperties:{};
-    for(const name of Object.keys(obj).filter(k=>!schema.properties?.[k])){const row=document.createElement('div');row.className='map-item';group.append(row);field(extra,obj[name],name,v=>{obj[name]=v;change(obj);},row,depth+1);const remove=document.createElement('button');remove.type='button';remove.textContent=`删除 ${name}`;remove.onclick=()=>{delete obj[name];change(obj);draw();};row.append(remove);}
+    for(const name of Object.keys(obj).filter(k=>!schema.properties?.[k])){const row=document.createElement('div');row.className='map-item';group.append(row);field(extra,obj[name],name,v=>{obj[name]=v;change(obj);},row,depth+1,`${path}/${part(name)}`);const remove=document.createElement('button');remove.type='button';remove.textContent=`删除 ${name}`;remove.onclick=()=>{delete obj[name];change(obj);draw();};row.append(remove);}
     const name=document.createElement('input');name.placeholder='新字段或编号';name.setAttribute('aria-label',`${key} 新字段编号`);const add=document.createElement('button');add.type='button';add.textContent='添加字段';add.onclick=()=>{if(!name.value.trim()||['__proto__','constructor','prototype'].includes(name.value.trim())||Object.hasOwn(obj,name.value.trim()))return;obj[name.value.trim()]=schemaDefaults(extra);change(obj);draw();};group.append(name,add);
    }
   }else if(schema.type==='array'){
    const arr=Array.isArray(current)?structuredClone(current):[];read=()=>arr;
-   arr.forEach((entry:any,index:number)=>{const row=document.createElement('div');row.className='array-item';wrap.append(row);field(schema.items??{},entry,`条目 ${index+1}`,v=>{arr[index]=v;change(arr);},row,depth+1);const remove=document.createElement('button');remove.type='button';remove.textContent='删除此项';remove.onclick=()=>{arr.splice(index,1);change(arr);draw();};row.append(remove);});
+   arr.forEach((entry:any,index:number)=>{const row=document.createElement('div');row.className='array-item';wrap.append(row);field(schema.items??{},entry,`条目 ${index+1}${entry?.id?' · '+entry.id:''}`,v=>{arr[index]=v;change(arr);},row,depth+1,`${path}/${part(String(entry?.id??entry?.presetId??index))}`);const remove=document.createElement('button');remove.type='button';remove.textContent='删除此项';remove.onclick=()=>{arr.splice(index,1);change(arr);draw();};row.append(remove);});
    const add=document.createElement('button');add.type='button';add.textContent='添加条目';add.disabled=arr.length>=(schema.maxItems??1000);add.onclick=()=>{const item=schemaDefaults(resolveSchema(schema.items??{},root));if(item&&typeof item==='object'&&!Array.isArray(item)&&schema.items?.properties?.id)item.id=crypto.randomUUID();arr.push(item);change(arr);draw();};wrap.append(add);
   }else if(schema.type==='boolean'){const input=document.createElement('input');input.type='checkbox';input.checked=!!current;input.onchange=()=>change(input.checked);bind(input);}
   else if(schema.type==='number'||schema.type==='integer'){const input=document.createElement('input');input.type='number';input.value=String(current??schema.minimum??0);input.step=schema.type==='integer'?'1':'any';if(schema.minimum!==undefined)input.min=String(schema.minimum);if(schema.maximum!==undefined)input.max=String(schema.maximum);input.oninput=()=>change(Number(input.value));bind(input);}
