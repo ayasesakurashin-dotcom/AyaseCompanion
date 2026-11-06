@@ -26,5 +26,6 @@ try{
  if(!$caseProcess.HasExited){throw "原生检查超时，隔离进程编号 $($caseProcess.Id)，证据保留在 $caseRoot"}
  $result=Get-Content -LiteralPath (Join-Path $caseRoot 'p4-native-smoke.json') -Raw|ConvertFrom-Json
  if($caseProcess.ExitCode -ne 0 -or $result.result -ne 'passed'){throw "原生检查失败：$($result.error)；证据：$caseRoot"}
- Write-Output "工作台原生回执通过：$($result.cases.Count) 项；证据：$caseRoot"
+ $caseCount=$result.cases.Count+$result.stateRoutingCases.Count
+ Write-Output "工作台原生回执通过：$caseCount 项；证据：$caseRoot"
 }finally{foreach($name in $names){[Environment]::SetEnvironmentVariable($name,$prior[$name])};Pop-Location}
