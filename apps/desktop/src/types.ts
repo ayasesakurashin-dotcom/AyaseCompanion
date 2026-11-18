@@ -5,7 +5,7 @@ export interface Task{id:number;generation:number;instanceId:string;owner:string
 export interface BaseTransition{id:number;generation:number;instanceId:string;parentTaskId:number;fromBase:string;targetBase:string;clips:string[];status:string}
 export interface Snapshot {
   appearance?:{settings:import('../../../packages/presentation/appearance.ts').Appearance;assetPaths:Record<string,string>};
-  petInteractive?:boolean;
+  petInteractive?:boolean;sceneBottom?:number;
   version:string;stage:string;instance:Json|null;instances:Json[];package:Json|null;manifest:Json|null;library:Json[];
   model:Model|null;assetPaths:Record<string,string>;plugins:Json[];configured:Json[];unknownPresets:Json[];
   scheduler:{active:Task|null;tasks:Task[];desiredBase:string;appliedBase:string;baseTransition?:BaseTransition|null;suppressed:boolean;muted:boolean;log:Json[];claims:Json[]};

@@ -15,8 +15,8 @@ const id=()=>crypto.randomUUID();
 export function setupControl(root:HTMLElement){
   let state:Snapshot|null=null,libraryKey='',pluginsKey='',assetsKey='',nameOwner='',nameDirty=false,bubbleDirty=false;
   root.innerHTML=`<div class="control-shell">
-    <header><img class="brand-mark" src="${appIcon}" alt="AyaseCompanion"><div><h1>AyaseCompanion</h1><p>你的桌面伙伴</p></div><span class="version">0.4.0 <b>P4 · 本机候选</b></span></header>
-    <div class="notice">P4 制作工作台候选版。制作预览默认模拟服务；本轮实机确认后再固定正式版本。</div>
+    <header><img class="brand-mark" src="${appIcon}" alt="AyaseCompanion"><div><h1>AyaseCompanion</h1><p>你的桌面伙伴</p></div><span class="version">0.4.1 <b>装饰扩展 · 已验收</b></span></header>
+    <div class="notice">制作工作台支持角色、动画与前后景装饰。制作预览默认使用模拟服务。</div>
     <nav aria-label="控制台页面"><button class="selected" data-tab="home">伙伴</button><button data-tab="play">播放验证</button><button data-tab="plugins">行为插件</button><button data-tab="diagnostics">运行记录</button></nav>
     <div id="message" role="status" aria-live="polite"></div>
     <section data-panel="home">
@@ -24,6 +24,7 @@ export function setupControl(root:HTMLElement){
       <div class="cards"><article><span class="eyebrow">当前伙伴</span><h3 id="active-name">尚未激活</h3><p id="active-detail"></p><div class="actions"><button data-action="input">展开输入框</button><button data-action="reset">找回桌宠</button><button data-action="rollback">回退角色包</button></div></article><article><span class="eyebrow">环境感知</span><p id="facts"></p><small id="facts-detail"></small></article></div>
       <div class="settings-row"><label>显示大小 <input id="zoom" type="range" min="0.6" max="1.6" step="0.1" value="1"></label><label class="switch"><input id="muted" type="checkbox">静音</label><button data-action="stop">停止当前回复</button></div>
       <div class="settings-row"><label>切换已创建的伙伴 <select id="instances"></select></label><button data-action="select-instance">切换</button></div>
+      <article><h3>前景与背景开关</h3><p>仅影响当前伙伴；位置、顺序和素材在制作工作台中编辑。</p><div id="decoration-switches"></div></article>
       <div class="settings-row"><label>当前伙伴名称 <input id="instance-name" maxlength="80" placeholder="为这位伙伴取个名字"></label><button data-action="rename">保存名称</button></div>
       <details class="bubble-settings"><summary>气泡外观与阅读</summary><p>气泡跟随角色大小，字体单独调整；读完自动收起。位置、最大宽高、颜色与输入背景透明度可在“主题与气泡”页设置。</p><div class="grid-two"><label>文字动画<select id="bubble-animation"><option value="typewriter">打字机</option><option value="none">立即显示</option></select></label><label>显现速度（字 / 秒）<input id="bubble-speed" type="number" min="10" max="80" value="30"></label><label>字号（像素）<input id="bubble-font" type="number" min="12" max="48" value="15"></label><label>每页最少阅读时间（毫秒）<input id="bubble-read" type="number" min="1000" max="30000" value="2800"></label></div><button data-action="save-bubble" class="primary">保存气泡设置</button><p class="hint">完整显示一页后才开始阅读计时；较长页面会自动延长。播放验证中的阅读时间可以延长，不能缩短此下限。</p></details>
       <div id="library" class="list empty">还没有素材包。先导入你自己的角色包。</div>
@@ -86,6 +87,7 @@ export function setupControl(root:HTMLElement){
       case 'uninstall':await invoke('uninstall_plugin',{pluginId:target.dataset.plugin});message('插件已卸载，角色配置与资产保留。');break;
       case 'rollback':await invoke('rollback_package');message('已回退角色包，实例身份保留。');break;
       case 'select-instance':await invoke('select_instance',{id:value('#instances')});break;
+      case 'decoration-toggle':case 'decoration-restore':await invoke('user_control',{action:'decoration',value:{instanceId:target.dataset.instance,id:target.dataset.layer,enabled:action==='decoration-restore'?null:target.dataset.enabled!=='true'}});break;
       case 'rename':await invoke('user_control',{action:'rename',value:{instanceId:nameOwner,name:value('#instance-name')}});nameDirty=false;message('伙伴名称已保存，身份与配置保持不变。');break;
       case 'save-bubble':await invoke('user_control',{action:'bubble',value:{animation:value('#bubble-animation'),charactersPerSecond:Number(value('#bubble-speed')),fontSize:Number(value('#bubble-font')),readMs:Number(value('#bubble-read'))}});bubbleDirty=false;message('气泡设置已保存。');break;
       case 'input':await invoke('show_window',{label:'input'});break;
@@ -132,6 +134,7 @@ export function setupControl(root:HTMLElement){
       $('#configured').innerHTML=s.configured.map(c=>`<article class="plugin-row"><div><h3>${esc(c.name)}</h3><small>${esc(c.status)} · ${esc(c.priority)} · ${esc(c.owner)}</small></div><div class="actions"><button data-action="edit" data-owner="${esc(c.owner)}">编辑参数</button><button data-action="toggle" data-owner="${esc(c.owner)}">${c.enabled?'关闭':'启用'}</button><button data-action="restore-recommended" data-owner="${esc(c.owner)}">恢复包推荐值</button>${c.pluginId.startsWith('ayase.')?'':`<button data-action="uninstall" data-plugin="${esc(c.pluginId)}">卸载 · 保留配置</button>`}</div></article>`).join('')||'<p class="empty">当前伙伴还没有已安装插件的配置。</p>';
       $('#unknown').innerHTML=s.unknownPresets.map(p=>`<article><h3>保留的未安装插件</h3><p>${esc(p.pluginId)} · ${esc(p.presetId)}</p><small>原始配置和资源保留，当前不执行。</small></article>`).join('');
     }
+    const dk=JSON.stringify([s.instance?.id,s.model?.decorations]);const dh=$('#decoration-switches');if(dh.dataset.key!==dk){dh.dataset.key=dk;dh.innerHTML=(s.model?.decorations??[]).map(d=>`<div class="list-row"><span>${esc(d.name||d.id)} · ${d.side==='background'?'背景':'前景'} · ${d.states===null?'全状态':d.states.join(' / ')||'无适用状态'}</span><div class="actions"><button data-action="decoration-toggle" data-instance="${esc(s.instance!.id)}" data-layer="${esc(d.id)}" data-enabled="${d.enabled}">${d.enabled?'关闭':'启用'}</button><button data-action="decoration-restore" data-instance="${esc(s.instance!.id)}" data-layer="${esc(d.id)}">恢复推荐值</button></div></div>`).join('')||'<p>此角色未配置装饰。</p>'; }
     const ak=s.package?.hash??'';if(ak!==assetsKey){assetsKey=ak;const assets=s.manifest?.assets??{};
       $('#audio').innerHTML='<option value="">不播放音声</option>'+Object.entries(assets).filter(([,a])=>(a as Json).kind==='audio').map(([k])=>`<option value="${esc(k)}">${esc(k)}</option>`).join('');
       $('#cue').innerHTML='<option value="">保持基础姿态</option>'+Object.keys(s.model?.semanticCues??{}).map(k=>`<option value="${esc(k)}">语义动作 · ${esc(k)}</option>`).join('')+Object.keys(s.model?.clips??{}).map(k=>`<option value="clip:${esc(k)}">片段 · ${esc(k)}</option>`).join('');

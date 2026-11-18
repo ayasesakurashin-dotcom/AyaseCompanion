@@ -20,6 +20,7 @@ use std::{
 use tauri::{Manager, State, WebviewWindow};
 use uuid::Uuid;
 mod appearance;
+mod decorations;
 mod hit_testing;
 mod p2;
 mod p3;
@@ -110,6 +111,8 @@ impl Default for Store {
     }
 }
 struct Host {
+    scene_padding: [f64; 3],
+    scene_bottom: f64,
     appearance_assets: BTreeMap<String, String>,
     root: PathBuf,
     db: Connection,
@@ -282,6 +285,8 @@ impl Host {
             previous_media_sources: vec![],
             last_wall: 0,
             startup_sent: false,
+            scene_padding: [0.0; 3],
+            scene_bottom: 0.0,
             renderer_ready: false,
             ai,
             p3: p3::P3::default(),
@@ -673,8 +678,8 @@ impl Host {
             facts.fullscreen_status = "采集超时 / 状态未知".into();
             facts.media_status = "采集超时 / 状态未知".into();
         }
-        json!({"version":"0.4.0","stage":"P4 · 已验收基线","p3":self.p3_snapshot(),"ai":self.ai_snapshot(),"instance":self.instance(),"instances":self.store.instances.iter().map(|i|json!({"id":i.id,"name":i.name,"packageHash":i.package_hash})).collect::<Vec<_>>(),"library":self.store.library,
-            "appearance":self.appearance_snapshot(),"package":self.package.as_ref().map(|p|&p.report),"manifest":self.package.as_ref().map(|p|&p.manifest),"model":self.package.as_ref().and_then(|p|p.model.as_ref()),"assetPaths":asset_paths,
+        json!({"version":"0.4.1","stage":"装饰扩展 · 已验收","p3":self.p3_snapshot(),"ai":self.ai_snapshot(),"instance":self.instance(),"instances":self.store.instances.iter().map(|i|json!({"id":i.id,"name":i.name,"packageHash":i.package_hash})).collect::<Vec<_>>(),"library":self.store.library,
+            "appearance":self.appearance_snapshot(),"package":self.package.as_ref().map(|p|&p.report),"manifest":self.package.as_ref().map(|p|&p.manifest),"sceneBottom":self.scene_bottom,"model":self.effective_model(),"assetPaths":asset_paths,
             "plugins":plugins,"configured":known,"unknownPresets":unknown,"scheduler":self.scheduler.snapshot(),"facts":facts,"zoom":self.store.zoom,"bubble":self.store.bubble,"excluded":self.store.excluded,"dataDirectory":self.root.to_string_lossy()})
     }
 }
@@ -1025,7 +1030,9 @@ async fn export_package(
         }
         manifest["pluginPresets"] = json!(presets);
         materialize_identity_assets(&mut manifest, &overrides);
-        let bytes = package::pack(p.files.clone(), manifest, "manifest.json")?;
+        let mut files = p.files.clone();
+        decorations::materialize(&mut files, &manifest, &overrides)?;
+        let bytes = package::pack(files, manifest, "manifest.json")?;
         package::validate(&bytes)?;
         let target = PathBuf::from(path);
         if target.exists() {
@@ -1181,6 +1188,10 @@ fn user_control(
             store.bubble = preferences;
             h.commit(store)?;
         }
+        "decoration" => {
+            control(&window)?;
+            h.set_decoration(&value)?;
+        }
         "stop" => {
             h.scheduler.stop(now);
             h.cancel_generations();
@@ -1201,7 +1212,7 @@ fn user_control(
             let mut store = h.store.clone();
             store.zoom = z;
             h.commit(store)?;
-            resize_pet(window.app_handle(), z, &h.store.appearance);
+            h.resize_scene(window.app_handle());
             clamp_pet(window.app_handle(), false);
         }
         "excluded" => {
@@ -1302,9 +1313,15 @@ fn clamp_pet(app: &tauri::AppHandle, reset: bool) {
         }
     }
 }
-fn resize_pet(app: &tauri::AppHandle, zoom: f64, appearance: &ayase_core::theme::Theme) {
+fn resize_pet(
+    app: &tauri::AppHandle,
+    zoom: f64,
+    appearance: &ayase_core::theme::Theme,
+    padding: [f64; 3],
+    old_bottom: f64,
+) -> f64 {
     let Some(pet) = app.get_webview_window("pet") else {
-        return;
+        return 0.0;
     };
     let old = pet.outer_position().ok().zip(pet.outer_size().ok());
     let scale = pet.scale_factor().unwrap_or(1.0);
@@ -1320,7 +1337,12 @@ fn resize_pet(app: &tauri::AppHandle, zoom: f64, appearance: &ayase_core::theme:
             max as f64 + 68.0 + 280.0 * zoom + (-(appearance.offset_y as f64)).max(0.0) + 24.0,
         );
     }
+    width += 2.0 * padding[0];
+    let mut bottom = padding[2];
     if let Ok(Some(monitor)) = pet.current_monitor() {
+        bottom = bottom
+            .min((monitor.work_area().size.height as f64 / scale - 280.0 * zoom - 68.0).max(0.0));
+        height += padding[1] + bottom;
         width = width.min(monitor.work_area().size.width as f64 / scale);
         height = height.min(monitor.work_area().size.height as f64 / scale);
     }
@@ -1328,11 +1350,14 @@ fn resize_pet(app: &tauri::AppHandle, zoom: f64, appearance: &ayase_core::theme:
         if let Some((position, size)) = old {
             let _ = pet.set_position(tauri::PhysicalPosition::new(
                 position.x + (size.width as f64 / 2.0 - width * scale / 2.0).round() as i32,
-                position.y + (size.height as f64 - height * scale).round() as i32,
+                position.y
+                    + (size.height as f64 - height * scale + (bottom - old_bottom) * scale).round()
+                        as i32,
             ));
         }
         clamp_pet(app, false);
     }
+    bottom
 }
 fn position_input(app: &tauri::AppHandle) {
     let (Some(pet), Some(input)) = (
@@ -1411,7 +1436,7 @@ pub fn run() {
             h.app = Some(app.handle().clone());
             crate::p3::screen::start(app.handle());
             allow_assets(app.handle(), &h);
-            resize_pet(app.handle(), h.store.zoom, &h.store.appearance);
+            h.resize_scene(app.handle());
             #[cfg(windows)]
             if let Some(pet) = app.get_webview_window("pet") {
                 h.env_settings.lock().unwrap().pet_hwnd = pet.hwnd()?.0 as isize;
@@ -1535,6 +1560,7 @@ pub fn run() {
             presentation_ack,
             base_transition_ack,
             renderer_ready,
+            decorations::pet_scene_layout,
             user_control,
             show_window,
             reset_position,

@@ -89,6 +89,6 @@ pub(super) fn appearance_settings(
             .asset_protocol_scope()
             .allow_directory(h.root.join("packages").join(hash).join("content"), true);
     }
-    resize_pet(window.app_handle(), h.store.zoom, &h.store.appearance);
+    h.resize_scene(window.app_handle());
     Ok(())
 }

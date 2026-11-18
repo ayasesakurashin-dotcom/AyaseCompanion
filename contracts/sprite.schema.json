@@ -274,6 +274,208 @@
           }
         }
       }
+    },
+    "decorationVersion": {
+      "const": "1.0"
+    },
+    "decorations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "side",
+          "order",
+          "enabled",
+          "source",
+          "anchor",
+          "pivot",
+          "offset",
+          "keepAspect",
+          "scale",
+          "speed",
+          "states"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 160
+          },
+          "side": {
+            "enum": [
+              "background",
+              "foreground"
+            ]
+          },
+          "order": {
+            "type": "number",
+            "minimum": -1000000000,
+            "maximum": 1000000000
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "source": {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": [
+                  "type",
+                  "asset"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "type": {
+                    "const": "image"
+                  },
+                  "asset": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type",
+                  "clip"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "type": {
+                    "const": "clip"
+                  },
+                  "clip": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  }
+                }
+              }
+            ]
+          },
+          "anchor": {
+            "type": "object",
+            "required": [
+              "x",
+              "y"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "x": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "y": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            }
+          },
+          "pivot": {
+            "type": "object",
+            "required": [
+              "x",
+              "y"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "x": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "y": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            }
+          },
+          "offset": {
+            "type": "object",
+            "required": [
+              "x",
+              "y"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "x": {
+                "type": "number",
+                "minimum": -65536,
+                "maximum": 65536
+              },
+              "y": {
+                "type": "number",
+                "minimum": -65536,
+                "maximum": 65536
+              }
+            }
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "number",
+                "minimum": 0.001,
+                "maximum": 65536
+              }
+            ]
+          },
+          "height": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "number",
+                "minimum": 0.001,
+                "maximum": 65536
+              }
+            ]
+          },
+          "keepAspect": {
+            "type": "boolean"
+          },
+          "scale": {
+            "type": "number",
+            "minimum": 0.001,
+            "maximum": 100
+          },
+          "speed": {
+            "type": "number",
+            "minimum": 0.001,
+            "maximum": 100
+          },
+          "states": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "enum": [
+                    "idle",
+                    "music",
+                    "quiet"
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      }
     }
   }
 }

@@ -1,3 +1,4 @@
+import {clipBounds} from '../../../packages/presentation/decorations.ts';
 import {displaySize} from '../../../packages/presentation/model.ts';
 import {invoke,convertFileSrc} from '@tauri-apps/api/core';
 import {getCurrentWindow} from '@tauri-apps/api/window';
@@ -6,15 +7,16 @@ import {BubblePresenter,defaultBubblePreferences} from '../../../packages/presen
 import {TaskAudioPlayer} from '../../../packages/presentation/audio.ts';
 import type {Snapshot,Task,BaseTransition} from './types.ts';
 
-export interface PetBridge {invoke:typeof invoke;assetUrl:(path:string)=>string;drag:()=>Promise<void>}
+export interface PetBridge {invoke:typeof invoke;assetUrl:(path:string)=>string;drag:()=>Promise<void>;native?:boolean}
 export function setupPet(root:HTMLElement,bridge:PetBridge={invoke,assetUrl:convertFileSrc,drag:()=>getCurrentWindow().startDragging()}){
-  root.innerHTML='<div class="pet-shell"><div class="bubble hidden" aria-live="off"></div><canvas aria-label="角色模型"></canvas><div class="pet-toolbar"><button data-input title="展开独立输入框">输入</button><button data-stop title="停止当前整条回复">停止</button><button data-settings title="打开控制台">设置</button></div><div class="pet-empty">请在控制台导入并激活角色包</div></div>';
-  const canvas=root.querySelector('canvas')!;
+  root.innerHTML='<div class="pet-shell"><div class="bubble hidden" aria-live="off"></div><div class="pet-model"><canvas aria-label="角色模型与装饰"></canvas></div><div class="pet-toolbar"><button data-input title="展开独立输入框">输入</button><button data-stop title="停止当前整条回复">停止</button><button data-settings title="打开控制台">设置</button></div><div class="pet-empty">请在控制台导入并激活角色包</div></div>';
+  const canvas=root.querySelector('canvas')!,modelBox=root.querySelector<HTMLElement>('.pet-model')!;
+  let decorationKey='',layoutKey='',layoutBusy=false,wantedKey='';
   let regionSendAt=0,regionBusy=false;
   const regions=async(s:Snapshot)=>{
     root.querySelector<HTMLElement>('.pet-shell')!.dataset.interactive=String(!!s.petInteractive);
     if(regionBusy||performance.now()-regionSendAt<100)return;
-    const shell=root.getBoundingClientRect(),box=canvas.getBoundingClientRect(),b=renderer.visibleBounds();
+    const shell=root.getBoundingClientRect(),box=modelBox.getBoundingClientRect(),b=renderer.visibleBounds();
     const rects:{x:number;y:number;width:number;height:number}[]=[];
     if(loaded&&s.model&&b.width>0&&b.height>0)rects.push({x:box.x-shell.x+b.x*box.width/logical.width,y:box.y-shell.y+b.y*box.height/logical.height,width:b.width*box.width/logical.width,height:b.height*box.height/logical.height});
     const toolbar=root.querySelector<HTMLElement>('.pet-toolbar')!.getBoundingClientRect();
@@ -78,9 +80,9 @@ export function setupPet(root:HTMLElement,bridge:PetBridge={invoke,assetUrl:conv
     }finally{ackPending=false;}
   };
   let drag=false,pointerStart:{x:number;y:number}|null=null,clickTimer=0,clickOwner='';let hitAreas:{id:string;x:number;y:number;width:number;height:number}[]=[];let logical={width:1,height:1};
-  canvas.addEventListener('pointerdown',e=>{if(e.button!==0)return;pointerStart={x:e.clientX,y:e.clientY};});
+  canvas.addEventListener('pointerdown',e=>{if(e.button!==0)return;const box=modelBox.getBoundingClientRect(),b=renderer.visibleBounds(),x=(e.clientX-box.x)/box.width*logical.width,y=(e.clientY-box.y)/box.height*logical.height;if(x<b.x||x>b.x+b.width||y<b.y||y>b.y+b.height)return;pointerStart={x:e.clientX,y:e.clientY};});
   canvas.addEventListener('pointermove',e=>{if(!pointerStart||drag)return;if(Math.hypot(e.clientX-pointerStart.x,e.clientY-pointerStart.y)>6){pointerStart=null;drag=true;clearTimeout(clickTimer);void bridge.drag().finally(()=>{drag=false;});}});
-  canvas.addEventListener('pointerup',e=>{if(!pointerStart||drag)return;pointerStart=null;const box=canvas.getBoundingClientRect(),x=(e.clientX-box.x)/box.width*logical.width,y=(e.clientY-box.y)/box.height*logical.height,bounds=renderer.visibleBounds();if(x<bounds.x||y<bounds.y||x>bounds.x+bounds.width||y>bounds.y+bounds.height)return;const area=hitAreas.find(a=>x/logical.width>=a.x&&y/logical.height>=a.y&&x/logical.width<a.x+a.width&&y/logical.height<a.y+a.height)?.id??'';const owner=clickOwner;if(!owner)return;if(clickTimer){clearTimeout(clickTimer);clickTimer=0;void bridge.invoke('pointer_event',{instanceId:owner,click:'double',area});}else clickTimer=window.setTimeout(()=>{clickTimer=0;if(owner===clickOwner)void bridge.invoke('pointer_event',{instanceId:owner,click:'single',area});},250);});
+  canvas.addEventListener('pointerup',e=>{if(!pointerStart||drag)return;pointerStart=null;const box=modelBox.getBoundingClientRect(),x=(e.clientX-box.x)/box.width*logical.width,y=(e.clientY-box.y)/box.height*logical.height,bounds=renderer.visibleBounds();if(x<bounds.x||y<bounds.y||x>bounds.x+bounds.width||y>bounds.y+bounds.height)return;const area=hitAreas.find(a=>x/logical.width>=a.x&&y/logical.height>=a.y&&x/logical.width<a.x+a.width&&y/logical.height<a.y+a.height)?.id??'';const owner=clickOwner;if(!owner)return;if(clickTimer){clearTimeout(clickTimer);clickTimer=0;void bridge.invoke('pointer_event',{instanceId:owner,click:'double',area});}else clickTimer=window.setTimeout(()=>{clickTimer=0;if(owner===clickOwner)void bridge.invoke('pointer_event',{instanceId:owner,click:'single',area});},250);});
   canvas.addEventListener('pointercancel',()=>{pointerStart=null;});
   root.querySelector('[data-input]')!.addEventListener('click',()=>void bridge.invoke('show_window',{label:'input'}));
   root.querySelector('[data-settings]')!.addEventListener('click',()=>void bridge.invoke('show_window',{label:'control'}));
@@ -88,17 +90,34 @@ export function setupPet(root:HTMLElement,bridge:PetBridge={invoke,assetUrl:conv
   async function update(s:Snapshot){
     hitAreas=s.model?.hitAreas??[];logical=s.model?.logicalSize??{width:1,height:1};
     if(clickOwner!==(s.instance?.id??'')){clearTimeout(clickTimer);clickTimer=0;clickOwner=s.instance?.id??'';}
-    const key=s.instance&&s.package?`${s.instance.id}:${s.package.hash}`:'';
+    const key=s.instance&&s.package?`${s.instance.id}:${s.package.hash}`:'';wantedKey=key;
     (root.querySelector('.pet-empty') as HTMLElement).hidden=!!key;
-    if(!key){if(loaded){clear();renderer.dispose();loaded='';}void regions(s);return;}
-    const {width,height}=displaySize(s.model!.logicalSize,s.zoom);canvas.style.width=`${width}px`;canvas.style.height=`${height}px`;
+    if(!key){clear();renderer.dispose();loaded='';decorationKey='';layoutKey='';void regions(s);return;}
+    const {width,height}=displaySize(s.model!.logicalSize,s.zoom);modelBox.style.width=`${width}px`;modelBox.style.height=`${height}px`;
     if(key!==loaded){if(loading)return;loading=true;clear();
-      try{await renderer.load(s.model!,Object.fromEntries(Object.entries(s.assetPaths).map(([id,path])=>[id,bridge.assetUrl(path)])));loaded=key;await bridge.invoke('renderer_ready',{instanceId:s.instance!.id,packageHash:s.package!.hash});}
+      try{await renderer.load(s.model!,Object.fromEntries(Object.entries(s.assetPaths).map(([id,path])=>[id,bridge.assetUrl(path)])),s.scheduler.appliedBase);if(wantedKey!==key){renderer.dispose();return;}loaded=key;decorationKey='';layoutKey='';await bridge.invoke('renderer_ready',{instanceId:s.instance!.id,packageHash:s.package!.hash});}
       catch(e){(root.querySelector('.pet-empty') as HTMLElement).hidden=false;root.querySelector('.pet-empty')!.textContent=String(e);}
       finally{loading=false;}void regions(s);return;
     }
-    const reference=renderer.referenceBounds(),box=canvas.getBoundingClientRect(),shell=root.getBoundingClientRect();
-    const sx=width/s.model!.logicalSize.width,sy=height/s.model!.logicalSize.height;
+    const nextDecorations=JSON.stringify(s.model!.decorations??[]);
+    if(decorationKey!==nextDecorations){await renderer.updateDecorations(s.model!.decorations??[]);if(wantedKey!==key)return;decorationKey=nextDecorations;}
+    const scene=renderer.sceneBounds();const sx=width/logical.width,sy=height/logical.height;
+    const padding=[Math.max(0,-scene.x,scene.x+scene.width-logical.width),Math.max(0,-scene.y),Math.max(0,scene.y+scene.height-logical.height)];
+    let sceneBottom=s.sceneBottom??0;
+    const nextLayout=JSON.stringify([key,padding,s.zoom,devicePixelRatio,screen.availWidth,screen.availHeight]);
+    if(bridge.native!==false&&nextLayout!==layoutKey&&!layoutBusy){layoutBusy=true;try{sceneBottom=Number(await bridge.invoke('pet_scene_layout',{instanceId:s.instance!.id,packageHash:s.package!.hash,padding}));if(wantedKey===key)layoutKey=nextLayout;}catch{/* A changed instance cannot resize the next model. */}finally{layoutBusy=false;}}
+    if(wantedKey!==key)return;
+    const bottom=bridge.native===false?Math.min(padding[2]*sy,Math.max(0,root.clientHeight-height-68)):sceneBottom;
+    root.querySelector<HTMLElement>('.pet-shell')!.style.paddingBottom=`${44+bottom}px`;
+    const reference=renderer.referenceBounds(),box=modelBox.getBoundingClientRect(),shell=root.getBoundingClientRect();
+    const viewport=clipBounds(scene,{x:(shell.x-box.x)/sx,y:(shell.y-box.y)/sy,width:shell.width/sx,height:shell.height/sy});
+    canvas.style.left=`${viewport.x*sx}px`;canvas.style.top=`${viewport.y*sy}px`;canvas.style.width=`${viewport.width*sx}px`;canvas.style.height=`${viewport.height*sy}px`;
+    renderer.setViewport(viewport,sx);
+    root.dataset.sceneClipped=String(viewport.width+.1<scene.width||viewport.height+.1<scene.height);
+    modelBox.querySelector('.decoration-guide')?.remove();
+    if(bridge.native===false&&root.dataset.decorationGuides==='true'){const g=renderer.decorationGuide(root.dataset.decorationSelected??'');if(g){const guide=document.createElement('div');guide.className='decoration-guide';guide.style.cssText=`left:${g.bounds.x*sx}px;top:${g.bounds.y*sy}px;width:${g.bounds.width*sx}px;height:${g.bounds.height*sy}px`;const mark=document.createElement('span');mark.textContent='＋';mark.style.cssText=`left:${(g.anchor.x-g.bounds.x)*sx}px;top:${(g.anchor.y-g.bounds.y)*sy}px`;guide.append(mark);modelBox.append(guide);}}
+
+
     const appearance=s.appearance?.settings,background=appearance?.backgroundAsset?s.appearance?.assetPaths[appearance.backgroundAsset]:undefined;
     bubble.layout({x:box.x-shell.x+reference.x*sx+reference.width*sx*(s.model!.anchors.bubble.x-.5),y:box.y-shell.y+reference.y*sy+reference.height*sy*s.model!.anchors.bubble.y,width:reference.width*sx,height:reference.height*sy},{width:shell.width,height:shell.height},s.zoom,s.bubble??defaultBubblePreferences,appearance,background?bridge.assetUrl(background):undefined);
     renderer.applyBase(s.scheduler.appliedBase);

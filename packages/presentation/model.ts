@@ -6,6 +6,8 @@ export interface Clip {
   offset?:{x:number;y:number};
 }
 export interface Model {
+  decorationVersion?:'1.0';
+  decorations?:import('./decorations.ts').Decoration[];
   hitAreas?:{id:string;x:number;y:number;width:number;height:number}[];
   logicalSize:{width:number;height:number};
   anchors:{feet:{x:number;y:number};bubble:{x:number;y:number}};

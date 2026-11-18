@@ -2,11 +2,17 @@
 
 独立开发的 Windows 桌面伙伴。Rust 宿主管理任务、规则插件、角色实例与配置，TypeScript / Canvas 呈现序列帧、文字气泡与音声。
 
-**v0.4.0 是已完成人工实机验收的 P4 基线**，后续开发从该版本继续。v0.1.0、v0.2.0、v0.3.0 的标签与发布包保留。
+**v0.4.1 是已完成人工实机验收的当前开发基线**，包含 P4 后的独立装饰扩展。v0.1.0 至 v0.4.0 的标签与发布包保留。
 
 v0.3.0 继承统一人格、OpenAI 兼容聊天、Fish Audio 语音与独立记忆，加入屏幕观察、公开资料搜索、天气/日历与默认关怀，以及按状态选择回复、连续多素材与直接动画。按 [服务配置说明](docs/p2-user-guide.md) 和 [P3 指南](docs/p3-user-guide.md) 配置服务与插件；新能力需单独启用。
 
 v0.4.0 加入独立制作工作台，可从素材创建角色、编辑动作与规则插件、模拟预览、导出并重新导入；支持气泡主题包、详细外观设置与包更新的三方合并。完整操作见 [制作工作台指南](docs/07-studio-guide.md)。
+
+v0.4.1 装饰扩展已发布：角色前后可放置多个独立静态或循环装饰，在同一画布合成，支持工作台制作、状态筛选与伙伴独立开关。见 [装饰制作说明](docs/09-decoration-authoring-guide.md) 和 [专项验收模板](docs/10-decoration-verification.md)。P5 尚未启动，后续开发以 v0.4.1 为基线。
+
+装饰显示切换支持约 200 毫秒的淡入淡出，保持隐藏暂停、显示续播；各制作页面均提供“保存并开始整体预览”。对应检查见 [淡变与整体预览专项复验](docs/13-decoration-polish-verification.md)。
+
+“动作与映射 → 添加动作片段”窗口支持静态图片、网格和逐帧矩形动画，提供尺寸推算、切片预览及宿主校验，见 [片段创建指南](docs/11-clip-creation-guide.md)。
 
 ## 使用
 
@@ -60,8 +66,8 @@ npm run fixtures
 ## 文档与版本
 
 - [系统设计](docs/01-system-design.md)、[包与协议](docs/02-protocols.md)、[阶段路线](docs/03-prototype-roadmap.md)、[验证方案](docs/04-verification.md)
-- [当前实现协议](contracts/README.md)、[v0.4.0 范围](docs/releases/v0.4.0.md)、[v0.3.0 范围](docs/releases/v0.3.0.md)、[v0.2.0 范围](docs/releases/v0.2.0.md)、[v0.1.0 范围](docs/releases/v0.1.0.md)、[版本保留和发布规则](docs/release-policy.md)
+- [当前实现协议](contracts/README.md)、[v0.4.1 范围](docs/releases/v0.4.1.md)、[v0.4.0 范围](docs/releases/v0.4.0.md)、[v0.3.0 范围](docs/releases/v0.3.0.md)、[v0.2.0 范围](docs/releases/v0.2.0.md)、[v0.1.0 范围](docs/releases/v0.1.0.md)、[版本保留和发布规则](docs/release-policy.md)
 
 每一阶段人工验收通过后才推送和发布。后续版本继续保留提交链，使用新的不可变标签和独立 Release 附件；全部约定设计验证完成后才发布 v1.0.0。实测批注、运行诊断、截图、个人路径与凭据仅保存在本机，不进入公开源码或发布包。
 
-P4 已通过人工实机验收，正式开发基线为 v0.4.0。候选程序、Ema 原素材和实机记录仅留本机；后续阶段继续独立交付候选并等待人工验收。
+P4 与独立装饰扩展已通过人工实机验收，正式开发基线为 v0.4.1。候选程序、Ema 原素材和实机记录仅留本机；后续阶段继续独立交付候选并等待人工验收。

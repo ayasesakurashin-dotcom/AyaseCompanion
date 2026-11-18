@@ -267,6 +267,7 @@ pub fn validate(bytes: &[u8]) -> Result<Package, String> {
             m["baseModes"].as_object_mut().unwrap().remove(&name);
             warnings.push(format!("基础姿态 {name} 缺少可用循环，降级到 idle"));
         }
+        warnings.extend(crate::decorations::validate(&m, &dims)?);
         model = Some(m);
         if let Some(path) = manifest["recommendedTheme"].as_str() {
             if let Err(e) =
@@ -334,7 +335,7 @@ fn number(v: &Value, key: &str) -> Result<u64, String> {
         .filter(|n| *n > 0)
         .ok_or_else(|| format!("{key} 必须是正整数"))
 }
-fn validate_layout(c: &Value, w: u32, h: u32) -> Result<(), String> {
+pub(crate) fn validate_layout(c: &Value, w: u32, h: u32) -> Result<(), String> {
     let l = &c["layout"];
     let count = match l["type"].as_str().unwrap() {
         "single" => 1,

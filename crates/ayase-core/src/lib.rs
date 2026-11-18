@@ -1,5 +1,6 @@
 pub mod behavior;
 pub mod config;
+pub mod decorations;
 pub mod package;
 pub mod plugin;
 pub mod presentation;

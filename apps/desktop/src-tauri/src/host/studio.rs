@@ -6,6 +6,7 @@ use ayase_core::{
     studio::{Document, Project},
     theme,
 };
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 pub(super) type StudioShared = Arc<Mutex<Studio>>;
@@ -16,6 +17,7 @@ struct Working {
 struct Prepared {
     project: String,
     revision: u64,
+    session: u64,
     id: u64,
     generation: u64,
     result: Result<(Value, Vec<String>), String>,
@@ -28,6 +30,7 @@ pub(super) struct Studio {
     preview: Scheduler,
     preview_project: String,
     preview_revision: u64,
+    preview_session: u64,
     preview_model: Value,
     preview_paths: Value,
     preview_theme: Value,
@@ -72,6 +75,7 @@ pub(super) fn new(root: PathBuf) -> Result<StudioShared, Box<dyn std::error::Err
         preview: Scheduler::new("studio"),
         preview_project: String::new(),
         preview_revision: 0,
+        preview_session: 0,
         preview_model: Value::Null,
         preview_paths: json!({}),
         preview_theme: theme::defaults(),
@@ -197,9 +201,37 @@ impl Studio {
         self.origin.elapsed().as_millis() as u64
     }
     fn stop(&mut self) {
+        self.preview_session += 1;
         self.cancel.store(true, Ordering::Relaxed);
         self.preview.stop(self.now());
         self.prepared = None;
+        self.preview_model = Value::Null;
+        self.preview_paths = json!({});
+    }
+    fn reset_preview(&mut self, project: &str, revision: u64) {
+        self.stop();
+        self.preview = Scheduler::new(&format!(
+            "studio:{project}:{revision}:{}",
+            self.preview_session
+        ));
+        self.preview_project = project.into();
+        self.preview_revision = revision;
+    }
+    fn owns_preview(&self, project: &str, revision: u64, session: u64) -> bool {
+        self.active.as_deref() == Some(project)
+            && self.preview_project == project
+            && self.preview_revision == revision
+            && self.preview_session == session
+            && !self.preview_model.is_null()
+    }
+    fn prepare_preview_session(&mut self, project: &str, revision: u64, restart: bool) {
+        if self.preview_project != project
+            || self.preview_revision != revision
+            || self.preview_model.is_null()
+            || restart
+        {
+            self.reset_preview(project, revision);
+        }
     }
     fn insert(&mut self, project: Project) -> Result<String, String> {
         let id = Uuid::new_v4().to_string();
@@ -226,7 +258,7 @@ impl Studio {
     fn tick(&mut self) {
         if let Some(rx) = &self.prepared {
             if let Ok(done) = rx.try_recv() {
-                let valid = self.active.as_deref() == Some(&done.project)
+                let valid = self.owns_preview(&done.project, done.revision, done.session)
                     && self
                         .working(&done.project)
                         .is_ok_and(|w| w.project.document.revision == done.revision);
@@ -328,7 +360,7 @@ impl Studio {
         let current=self.active.as_ref().and_then(|id|self.projects.get(id).map(|w|json!({"id":id,"document":w.project.document,"assets":w.project.document.manifest["assets"],"assetPaths":w.project.document.manifest["assets"].as_object().map(|a|a.iter().filter_map(|(id,v)|Some((id.clone(),json!(w.root.join("files").join(v["path"].as_str()?).to_string_lossy())))).collect::<serde_json::Map<_,_>>()),"files":w.project.files.iter().map(|(p,b)|json!({"path":p,"bytes":b.len()})).collect::<Vec<_>>()})));
         let mut plugins = registry.clone();
         plugins.extend(self.plugins.clone());
-        json!({"projects":projects,"current":current,"plugins":plugins.iter().map(|(id,p)|json!({"id":id,"name":p.manifest["displayName"],"schema":p.schema,"defaults":p.manifest["defaults"],"configVersion":p.manifest["configVersion"],"priority":p.manifest["defaultPriority"]})).collect::<Vec<_>>(),"contracts":{"sprite":ayase_core::schema::contract("sprite"),"request":ayase_core::schema::contract("request"),"theme":ayase_core::schema::contract("theme"),"rules":ayase_core::schema::contract("rules")},"preview":{"projectId":self.preview_project,"revision":self.preview_revision,"model":self.preview_model,"assetPaths":self.preview_paths,"theme":self.preview_theme,"themeAssetPaths":self.preview_theme_paths,"zoom":self.preview_zoom,"scheduler":self.preview.snapshot()},"notice":self.notice})
+        json!({"projects":projects,"current":current,"plugins":plugins.iter().map(|(id,p)|json!({"id":id,"name":p.manifest["displayName"],"schema":p.schema,"defaults":p.manifest["defaults"],"configVersion":p.manifest["configVersion"],"priority":p.manifest["defaultPriority"]})).collect::<Vec<_>>(),"contracts":{"sprite":ayase_core::schema::contract("sprite"),"request":ayase_core::schema::contract("request"),"theme":ayase_core::schema::contract("theme"),"rules":ayase_core::schema::contract("rules")},"preview":{"projectId":self.preview_project,"revision":self.preview_revision,"session":self.preview_session,"model":self.preview_model,"assetPaths":self.preview_paths,"theme":self.preview_theme,"themeAssetPaths":self.preview_theme_paths,"zoom":self.preview_zoom,"scheduler":self.preview.snapshot()},"notice":self.notice})
     }
 }
 #[tauri::command]
@@ -354,6 +386,7 @@ pub(super) fn studio_ack(
     studio: State<StudioShared>,
     project_id: String,
     revision: u64,
+    session: u64,
     id: u64,
     generation: u64,
     channel: String,
@@ -361,10 +394,7 @@ pub(super) fn studio_ack(
 ) -> Result<bool, String> {
     control(&window)?;
     let mut s = studio.lock().unwrap();
-    if s.active.as_deref() != Some(&project_id)
-        || s.preview_project != project_id
-        || s.preview_revision != revision
-    {
+    if !s.owns_preview(&project_id, revision, session) {
         return Ok(false);
     }
     let now = s.now();
@@ -431,6 +461,17 @@ pub(super) async fn studio_command(
 ) -> Result<Value, String> {
     control(&window)?;
     let shared = studio.inner().clone();
+    #[cfg(feature = "smoke-test")]
+    if action == "smoke-decoration-proof" {
+        control(&window)?;
+        let root = state.lock().unwrap().root.clone();
+        fs::write(
+            root.join("decoration-native-proof.json"),
+            serde_json::to_vec_pretty(&payload).unwrap(),
+        )
+        .map_err(|e| e.to_string())?;
+        return Ok(json!(true));
+    }
     let app = window.app_handle().clone();
     let (registry, settings, profile, chat_key, voice_key, current, default_theme) = {
         let h = state.lock().unwrap();
@@ -459,6 +500,7 @@ pub(super) async fn studio_command(
                 })
                 .collect::<Vec<_>>());
             materialize_identity_assets(&mut p.manifest, &h.instance().unwrap().overrides);
+            decorations::materialize(&mut p.files, &p.manifest, &h.instance().unwrap().overrides)?;
             Some(Project::from_package(p)?)
         } else {
             None
@@ -493,11 +535,71 @@ pub(super) async fn studio_command(
    "import-plugin"=>{let path=payload["path"].as_str().ok_or("请选择插件包")?;if fs::metadata(path).map_err(|e|e.to_string())?.len()>package::MAX_TOTAL{return Err("插件包过大".into());}let p=package::validate(&fs::read(path).map_err(|e|e.to_string())?)?;if p.report.kind!="plugin"{return Err("请选择规则插件".into());}let plugin=Plugin::from_files(p.manifest,&p.files)?;let dest=s.root.join("plugin-library").join(format!("{}.ayplug",p.report.hash));if !dest.exists(){write_new(&dest,&fs::read(path).map_err(|e|e.to_string())?)?;}let index_path=s.root.join("plugin-library/index.json");let mut index:BTreeMap<String,String>=fs::read(&index_path).ok().and_then(|b|serde_json::from_slice(&b).ok()).unwrap_or_default();index.insert(p.report.id.clone(),p.report.hash);atomic_write(&index_path,&serde_json::to_vec_pretty(&index).unwrap())?;s.plugins.insert(p.report.id,plugin);Ok(json!(true))},
    "import-presets"=>{let path=payload["path"].as_str().ok_or("请选择预设清单")?;if fs::metadata(path).map_err(|e|e.to_string())?.len()>2*1024*1024{return Err("预设清单过大".into());}let rows:Value=serde_json::from_slice(&fs::read(path).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;package::no_private_fields(&rows)?;let mut p=s.working(&id)?.project.clone();if p.document.kind!="character"{return Err("请打开角色项目".into());}let list=p.document.manifest["pluginPresets"].as_array_mut().ok_or("缺少预设数组")?;for row in rows.as_array().ok_or("预设清单必须是数组")?{let owner=row["presetId"].as_str().ok_or("预设缺少presetId")?;if let Some(index)=list.iter().position(|p|p["presetId"]==owner){list[index]=row.clone();}else{list.push(row.clone());}}ayase_core::schema::validate(&ayase_core::schema::contract("character"),&p.document.manifest)?;p.document.revision+=1;s.commit_project(&id,p)?;Ok(json!(true))},
    "validate"|"export"=>{let mut p=s.working(&id)?.project.clone();let mut plugins=registry.clone();plugins.extend(s.plugins.clone());if p.document.kind=="character"{p.document.manifest["pluginPresets"]=ayase_core::studio::effective_presets(&p.document.manifest,&plugins)?;}let bytes=p.export()?;let package=package::validate(&bytes)?;if action=="export"{write_new(std::path::Path::new(payload["path"].as_str().ok_or("请选择新导出文件")?),&bytes)?;}Ok(json!({"report":package.report,"files":package.files.iter().map(|(path,b)|json!({"path":path,"bytes":b.len(),"sha256":package::digest(b)})).collect::<Vec<_>>()}))},
+   "check-clip"=>{let p=&s.working(&id)?.project;if payload["revision"].as_u64()!=Some(p.document.revision){return Err("项目已更新，请重新打开添加窗口".into());}p.check_clip(&payload["clip"])},
+   "preview-decorations"=>{
+     let mut p=s.working(&id)?.project.clone();
+     if payload["revision"].as_u64()!=Some(p.document.revision) || s.preview_project!=id || s.preview_revision!=p.document.revision || s.preview_model.is_null(){return Err("请先保存并启动整体预览".into());}
+     p.document.model["decorations"]=payload["decorations"].clone();p.document.model["decorationVersion"]=json!("1.0");
+     let checked=package::validate(&p.export()?)?;
+     s.preview_model["decorations"]=checked.model.as_ref().unwrap()["decorations"].clone();
+     s.preview_model["decorationVersion"]=json!("1.0");Ok(json!(true))
+   },
    "stop"=>{s.stop();Ok(json!(true))},
    "preview"=>preview(&mut s,&app,&registry,settings,profile,chat_key,voice_key,default_theme,&id,&payload),
    _=>Err("未知工作台操作".into())
   }
  }).await.map_err(|e|e.to_string())?
+}
+
+// Installing a scene does not dispatch plugins or create a presentation task.
+// Keep full package validation in preview() before entering this function.
+fn install_preview_scene(
+    s: &mut Studio,
+    app: &tauri::AppHandle,
+    package: &Package,
+    root: &Path,
+    doc: &Document,
+    default_theme: &Value,
+    id: &str,
+    options: &Value,
+) {
+    let base = options["base"].as_str().unwrap_or("idle");
+    s.prepare_preview_session(id, doc.revision, options["sceneOnly"] == true);
+    s.preview
+        .claim("studio.environment", base, Priority::Normal, false);
+    s.preview.applied_base = base.into();
+    s.preview.desired_base = base.into();
+    s.preview_model = package.model.clone().unwrap();
+    s.preview_paths = json!(package.manifest["assets"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .filter_map(|(id, a)| Some((
+            id.clone(),
+            json!(root.join(a["path"].as_str()?).to_string_lossy())
+        )))
+        .collect::<serde_json::Map<_, _>>());
+    s.preview_zoom = options["zoom"].as_f64().unwrap_or(1.0).clamp(0.6, 1.6);
+    s.preview_theme_paths = if doc.theme.is_null() {
+        default_theme["assetPaths"].clone()
+    } else {
+        json!(doc.theme["assets"]
+            .as_object()
+            .map(|a| a
+                .iter()
+                .filter_map(|(id, v)| Some((
+                    id.clone(),
+                    json!(root.join(v["path"].as_str()?).to_string_lossy())
+                )))
+                .collect::<serde_json::Map<_, _>>())
+            .unwrap_or_default())
+    };
+    s.preview_theme = if doc.theme.is_null() {
+        default_theme["settings"].clone()
+    } else {
+        doc.theme.clone()
+    };
+    let _ = app.asset_protocol_scope().allow_directory(&root, true);
 }
 
 fn preview(
@@ -546,6 +648,10 @@ fn preview(
         }
         standin.validated()?
     };
+    if options["sceneOnly"] == true {
+        install_preview_scene(s, app, &package, &root, &doc, &default_theme, id, options);
+        return Ok(json!({"taskId":null}));
+    }
     let epoch = doc.revision;
     let mut response = options["response"].clone();
     let base = options["base"].as_str().unwrap_or("idle");
@@ -638,47 +744,9 @@ fn preview(
     let (response, route) =
         plugin::response_for_base(&response, base).ok_or("当前模拟状态没有匹配回复")?;
     let response = response.clone();
-    if s.preview_project != id || s.preview_revision != epoch {
-        s.stop();
-        s.preview = Scheduler::new(&format!("studio:{id}:{epoch}"));
-        s.preview_project = id.into();
-        s.preview_revision = epoch;
-    }
-    s.preview
-        .claim("studio.environment", base, Priority::Normal, false);
-    s.preview.applied_base = base.into();
-    s.preview.desired_base = base.into();
-    s.preview_model = package.model.clone().unwrap();
-    s.preview_paths = json!(package.manifest["assets"]
-        .as_object()
-        .unwrap()
-        .iter()
-        .filter_map(|(id, a)| Some((
-            id.clone(),
-            json!(root.join(a["path"].as_str()?).to_string_lossy())
-        )))
-        .collect::<serde_json::Map<_, _>>());
-    s.preview_zoom = options["zoom"].as_f64().unwrap_or(1.0).clamp(0.6, 1.6);
-    s.preview_theme_paths = if doc.theme.is_null() {
-        default_theme["assetPaths"].clone()
-    } else {
-        json!(doc.theme["assets"]
-            .as_object()
-            .map(|a| a
-                .iter()
-                .filter_map(|(id, v)| Some((
-                    id.clone(),
-                    json!(root.join(v["path"].as_str()?).to_string_lossy())
-                )))
-                .collect::<serde_json::Map<_, _>>())
-            .unwrap_or_default())
-    };
-    s.preview_theme = if doc.theme.is_null() {
-        default_theme["settings"].clone()
-    } else {
-        doc.theme.clone()
-    };
-    let _ = app.asset_protocol_scope().allow_directory(&root, true);
+    install_preview_scene(s, app, &package, &root, &doc, &default_theme, id, options);
+    let session = s.preview_session;
+    let instance = s.preview.current_instance.clone();
     if claim_only {
         let (mode, suppress) = claimed.unwrap();
         s.preview
@@ -731,7 +799,7 @@ fn preview(
     }
     let task = s.preview.submit(
         Request {
-            instance_id: format!("studio:{id}:{epoch}"),
+            instance_id: instance.clone(),
             owner: "studio.preview".into(),
             revision: 0,
             priority,
@@ -781,7 +849,7 @@ fn preview(
             context: crate::p3::Context::default(),
             id: task,
             generation,
-            instance: format!("studio:{id}:{epoch}"),
+            instance,
             epoch: 0,
             profile_revision: 0,
             turn: Uuid::new_v4().to_string(),
@@ -872,6 +940,7 @@ fn preview(
             let _ = tx.send(Prepared {
                 project: owner,
                 revision: epoch,
+                session,
                 id: task,
                 generation,
                 result,
@@ -886,6 +955,108 @@ fn preview(
 mod tests {
     use super::super::tests::TestRoot;
     use super::*;
+    #[test]
+    fn preview_restart_rejects_old_session_receipts_and_prepared_results() {
+        let root = TestRoot::new();
+        let studio = new(root.0.clone()).unwrap();
+        let mut s = studio.lock().unwrap();
+        let project = s.insert(Project::theme()).unwrap();
+        let revision = s.working(&project).unwrap().project.document.revision;
+        let submit = |s: &mut Studio| {
+            s.preview
+                .submit(
+                    Request {
+                        instance_id: s.preview.current_instance.clone(),
+                        owner: "studio.preview".into(),
+                        revision: 0,
+                        priority: Priority::Normal,
+                        proactive: false,
+                        ttl_ms: 300000,
+                        preparing: true,
+                        plan: json!({}),
+                        channels: vec![],
+                        dedupe: None,
+                    },
+                    s.now(),
+                )
+                .unwrap()
+        };
+        s.reset_preview(&project, revision);
+        s.preview_model = json!({"baseModes":{"idle":{"loop":"idle"}}});
+        let old_session = s.preview_session;
+        let old_instance = s.preview.current_instance.clone();
+        let old_id = submit(&mut s);
+        let old_generation = s.preview.tasks[0].generation;
+        let old_cancel = Arc::new(AtomicBool::new(false));
+        s.cancel = old_cancel.clone();
+        let (old_tx, old_rx) = mpsc::channel();
+        s.prepared = Some(old_rx);
+
+        s.reset_preview(&project, revision);
+        s.preview_model = json!({"baseModes":{"idle":{"loop":"idle"}}});
+        let session = s.preview_session;
+        let id = submit(&mut s);
+        let generation = s.preview.tasks[0].generation;
+        assert_eq!((old_id, old_generation), (id, generation));
+        assert_ne!(old_instance, s.preview.current_instance);
+        assert!(old_cancel.load(Ordering::Relaxed));
+        assert!(old_tx
+            .send(Prepared {
+                project: project.clone(),
+                revision,
+                session: old_session,
+                id,
+                generation,
+                result: Err("cancelled old result".into()),
+            })
+            .is_err());
+        assert!(!s.owns_preview(&project, revision, old_session));
+        assert!(s.owns_preview(&project, revision, session));
+
+        // Even a delayed result delivered to the live receiver cannot cross sessions.
+        let (tx, rx) = mpsc::channel();
+        s.prepared = Some(rx);
+        tx.send(Prepared {
+            project: project.clone(),
+            revision,
+            session: old_session,
+            id,
+            generation,
+            result: Err("must not fail the new task".into()),
+        })
+        .unwrap();
+        s.tick();
+        assert_eq!(s.preview.tasks[0].status, Status::Preparing);
+        let (tx, rx) = mpsc::channel();
+        s.prepared = Some(rx);
+        tx.send(Prepared {
+            project: project.clone(),
+            revision,
+            session,
+            id,
+            generation,
+            result: Ok((json!({"text":"new session"}), vec!["text".into()])),
+        })
+        .unwrap();
+        s.tick();
+        assert_eq!(s.preview.tasks[0].status, Status::Starting);
+        assert_eq!(s.preview.tasks[0].plan["text"], "new session");
+        s.stop();
+        assert!(!s.owns_preview(&project, revision, session));
+        s.prepare_preview_session(&project, revision, false);
+        s.preview_model = json!({"baseModes":{"idle":{"loop":"idle"}}});
+        let resumed_session = s.preview_session;
+        assert_ne!(session, resumed_session);
+        assert_eq!(
+            s.preview.current_instance,
+            format!("studio:{project}:{revision}:{resumed_session}")
+        );
+        assert!(s.owns_preview(&project, revision, resumed_session));
+        let resumed_id = submit(&mut s);
+        assert_eq!(resumed_id, 1);
+        s.prepare_preview_session(&project, revision, false);
+        assert_eq!(s.preview_session, resumed_session);
+    }
     #[test]
     fn imported_plugin_restart_uses_selected_hash_not_directory_order() {
         let root = TestRoot::new();

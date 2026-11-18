@@ -29,6 +29,27 @@ pub struct Project {
     pub files: BTreeMap<String, Vec<u8>>,
 }
 impl Project {
+    /// Check a creator draft against the actual project image, without saving it
+    /// or requiring the rest of an unfinished character to be exportable.
+    pub fn check_clip(&self, clip: &Value) -> Result<Value, String> {
+        if self.document.kind != "character" {
+            return Err("动作片段仅适用于角色项目".into());
+        }
+        let schema = crate::schema::contract("sprite");
+        crate::schema::validate(&schema["properties"]["clips"]["additionalProperties"], clip)?;
+        let id = clip["asset"].as_str().ok_or("请选择图片素材")?;
+        let asset = &self.document.manifest["assets"][id];
+        if asset["kind"] != "image" {
+            return Err("片段必须使用素材库中的图片".into());
+        }
+        let bytes = asset["path"]
+            .as_str()
+            .and_then(|path| self.files.get(path))
+            .ok_or("图片素材文件不存在")?;
+        let (width, height) = package::image_dimensions(bytes)?;
+        package::validate_layout(clip, width, height)?;
+        Ok(json!({"width":width,"height":height,"valid":true}))
+    }
     pub fn character() -> Self {
         Self {
             document: Document {
@@ -131,6 +152,19 @@ impl Project {
         package::no_private_fields(
             &json!({"manifest":next.manifest,"model":next.model,"schema":next.config_schema,"rules":next.rules,"theme":next.theme}),
         )?;
+        if let Some(clips) = self.document.model["clips"].as_object() {
+            for id in clips.keys() {
+                if next.model["clips"].get(id).is_none()
+                    && next.model["decorations"].as_array().is_some_and(|layers| {
+                        layers
+                            .iter()
+                            .any(|d| d["source"]["type"] == "clip" && d["source"]["clip"] == *id)
+                    })
+                {
+                    return Err(format!("片段 {id} 仍被装饰引用，请先修改装饰来源"));
+                }
+            }
+        }
         next.revision = expected + 1;
         self.document = next;
         Ok(())
@@ -351,7 +385,30 @@ impl Project {
             .remove(from)
             .ok_or("素材不存在")?;
         replace(&mut self.document.manifest, from, to);
-        replace(&mut self.document.model, from, to);
+        if let Some(clips) = self
+            .document
+            .model
+            .get_mut("clips")
+            .and_then(Value::as_object_mut)
+        {
+            for clip in clips.values_mut() {
+                if clip["asset"] == from {
+                    clip["asset"] = json!(to);
+                }
+            }
+        }
+        if let Some(layers) = self
+            .document
+            .model
+            .get_mut("decorations")
+            .and_then(Value::as_array_mut)
+        {
+            for layer in layers {
+                if layer["source"]["type"] == "image" && layer["source"]["asset"] == from {
+                    layer["source"]["asset"] = json!(to);
+                }
+            }
+        }
         replace(&mut self.document.theme, from, to);
         if let Some(assets) = self
             .document

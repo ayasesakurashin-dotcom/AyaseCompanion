@@ -1,4 +1,90 @@
 use super::*;
+#[test]
+fn creator_checks_actual_image_without_mutating_incomplete_project() {
+    let mut p = Project::character();
+    p.asset("picture", "image", "picture.png", png()).unwrap();
+    p.asset("text", "text", "text.txt", b"hello".to_vec())
+        .unwrap();
+    let original = serde_json::to_value(&p.document).unwrap();
+    let single = json!({"asset":"picture","layout":{"type":"single"},"frameDurationMs":1000,"direction":"forward"});
+    assert_eq!(
+        p.check_clip(&single).unwrap(),
+        json!({"valid":true,"width":32,"height":32})
+    );
+    let mut grid = json!({"asset":"picture","layout":{"type":"grid","columns":3,"rows":3,"cellWidth":10,"cellHeight":10,"frameCount":8},"frameDurationMs":200,"direction":"ping-pong","returnToStart":true,"startReverse":false});
+    // Unused image edges and unused final cells are valid author choices.
+    assert!(p.check_clip(&grid).is_ok());
+    grid["layout"]["frameCount"] = json!(10);
+    assert!(p.check_clip(&grid).is_err());
+    grid["layout"]["frameCount"] = json!(8);
+    grid["layout"]["cellWidth"] = json!(11);
+    assert!(p.check_clip(&grid).is_err());
+    grid["layout"] = json!({"type":"rects","frames":[{"x":0,"y":0,"width":32,"height":16},{"x":0,"y":0,"width":16,"height":32}]});
+    assert!(p.check_clip(&grid).is_ok());
+    grid["layout"]["frames"][1]["x"] = json!(17);
+    assert!(p.check_clip(&grid).is_err());
+    for (key, value) in [
+        ("asset", json!("missing")),
+        ("asset", json!("text")),
+        ("direction", json!("other")),
+        ("frameDurationMs", json!(0)),
+    ] {
+        let mut bad = single.clone();
+        bad[key] = value;
+        assert!(p.check_clip(&bad).is_err());
+    }
+    assert_eq!(serde_json::to_value(&p.document).unwrap(), original);
+}
+#[test]
+fn decorations_roundtrip_references_and_validation() {
+    let mut p = Project::character();
+    p.asset("body", "image", "assets/body.png", png()).unwrap();
+    p.asset("ornament", "image", "assets/ornament.png", png())
+        .unwrap();
+    p.document.model["clips"]["idle"] = json!({"asset":"body","layout":{"type":"single"},"frameDurationMs":1000,"direction":"forward"});
+    p.document.model["clips"]["ornament"] = json!({"asset":"ornament","layout":{"type":"single"},"frameDurationMs":200,"direction":"forward"});
+    p.document.model["decorationVersion"] = json!("1.0");
+    let layer = json!({"id":"wreath","side":"foreground","order":0,"enabled":true,"source":{"type":"clip","clip":"ornament"},"anchor":{"x":0.5,"y":1},"pivot":{"x":0.5,"y":1},"offset":{"x":0,"y":0},"width":null,"height":null,"keepAspect":true,"scale":1,"speed":1,"states":["music"]});
+    p.document.model["decorations"] = json!([layer.clone()]);
+    let mut next = p.document.clone();
+    next.model["clips"]
+        .as_object_mut()
+        .unwrap()
+        .remove("ornament");
+    assert!(p
+        .save_document(p.document.revision, next)
+        .unwrap_err()
+        .contains("仍被装饰引用"));
+    assert!(p.delete_asset("ornament").is_err());
+    p.rename_asset("ornament", "ornament-new").unwrap();
+    // Asset renaming must not rename a different namespace's clip ID.
+    assert_eq!(
+        p.document.model["decorations"][0]["source"]["clip"],
+        "ornament"
+    );
+    assert_eq!(
+        p.document.model["clips"]["ornament"]["asset"],
+        "ornament-new"
+    );
+    let package = p.validated().unwrap();
+    assert!(package.report.warnings.is_empty());
+    let restored = Project::from_package(package).unwrap();
+    assert_eq!(
+        restored.document.model["decorations"],
+        p.document.model["decorations"]
+    );
+    for (key, value) in [("speed", json!(0)), ("scale", json!(-1))] {
+        let mut invalid = restored.clone();
+        invalid.document.model["decorations"][0][key] = value;
+        assert!(invalid.export().is_err());
+    }
+    let mut invalid = restored.clone();
+    invalid.document.model["decorations"]
+        .as_array_mut()
+        .unwrap()
+        .push(layer);
+    assert!(invalid.export().is_err());
+}
 fn png() -> Vec<u8> {
     let image = image::RgbaImage::from_pixel(32, 32, image::Rgba([20, 100, 180, 255]));
     let mut b = std::io::Cursor::new(vec![]);
